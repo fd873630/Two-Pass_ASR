@@ -263,7 +263,6 @@ def main():
             torch.save(rnnt_model.module.state_dict(), "./model_save/first_train_model_save.pth")
             torch.save(enc.state_dict(), "./model_save/first_train_enc_save.pth")
             pre_val_loss = val_loss
-
-        
+    
 if __name__ == '__main__':
     main()

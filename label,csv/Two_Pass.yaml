@@ -36,7 +36,7 @@ model:
     hidden_size: 1024
     n_layers: 2
     embedding_size: 96
-    projection_dim: 640
+    projection_dim: 320
    
   joint:
     inner_dim: 320
@@ -47,7 +47,10 @@ model:
 training:
   begin_epoch: 0
   end_epoch: 100
-  
+
+inference:
+  beam_search: False
+
 optim:
   type: "AdamW"
   lr: 0.0001

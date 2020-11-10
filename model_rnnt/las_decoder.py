@@ -78,7 +78,6 @@ class Speller(nn.Module):
 
         inputs, batch_size, max_length = self.validate_args(inputs, encoder_outputs, teacher_forcing_ratio) # inference를 위한거 크게 신경 x
 
-
         inputs_add_sos = torch.LongTensor([self.sos_id]*batch_size).view(batch_size, 1)
         
         if inputs.is_cuda: inputs_add_sos = inputs_add_sos.cuda()
@@ -86,8 +85,8 @@ class Speller(nn.Module):
         inputs = torch.cat((inputs_add_sos, inputs), dim=1)
 
         use_teacher_forcing = True if random.random() < teacher_forcing_ratio else False
+        
         lengths = np.array([max_length] * batch_size)
-
         
         if use_teacher_forcing:
             inputs = inputs[inputs != self.eos_id].view(batch_size, -1)
@@ -101,10 +100,10 @@ class Speller(nn.Module):
         else:
             #inputs = inputs[inputs != self.eos_id].view(batch_size, -1)
             input_var = inputs[:, 0].unsqueeze(1)
-
+            
             for di in range(max_length):
                 step_output, hidden, attn = self.forward_step(input_var, hidden, encoder_outputs, attn)
-                result.append(step_output)
+                result.append(step_output.squeeze())
                 input_var = result[-1].topk(1)[1]
                 input_var = input_var.squeeze().unsqueeze(1)
                 
@@ -125,7 +124,7 @@ class Speller(nn.Module):
         
         else:
             del decode_dict
-        
+
         return result
 
     def validate_args(self, inputs, encoder_outputs, teacher_forcing_ratio):

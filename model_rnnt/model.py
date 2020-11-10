@@ -68,7 +68,7 @@ class Transducer(nn.Module):
         batch_size = inputs.size(0)
 
         enc_states, _ = self.encoder(inputs, inputs_length)
-
+        enc_states = self.project_layer(enc_states)
         zero_token = torch.LongTensor([[0]])
 
         if inputs.is_cuda:
@@ -77,7 +77,6 @@ class Transducer(nn.Module):
         def decode(enc_state, lengths):
             token_list = []
             dec_state, hidden = self.decoder(zero_token)
-
             #print(len(hidden))
             for t in range(lengths):
                 logits = self.joint(enc_state[t].view(-1), dec_state.view(-1))
@@ -97,9 +96,11 @@ class Transducer(nn.Module):
             return token_list
 
         results = []
-
+        
         for i in range(batch_size):
+            
             decoded_seq = decode(enc_states[i], inputs_length[i])
+            
             results.append(decoded_seq)
 
         return results
@@ -129,7 +130,7 @@ class Transducer(nn.Module):
         
         batch_size = inputs.size(0)
         enc_states, _ = self.encoder(inputs, inputs_length)
-
+        enc_states = self.project_layer(enc_states)
         enc_states_for_beam = enc_states.squeeze()
         
         prefix = False
