@@ -60,33 +60,19 @@ class SpectrogramParser(AudioParser):
         self.spec_augment = spec_augment
 
     def parse_audio(self, audio_path):
-
-        start_time = time.time()
+        
         y,sr = librosa.load(audio_path, 16000)
-            
+        
         n_fft = int(self.sample_rate * self.window_size)
         win_length = n_fft
         hop_length = int(self.sample_rate * self.window_stride)
-            
-        # log_mel spec
-        if self.feature_type == "log_mel":
-            D = np.abs(librosa.stft(y, n_fft=n_fft, hop_length=hop_length,
-                        win_length=win_length, window=self.window))
-                
-            mel_spec = librosa.feature.melspectrogram(S=D, sr=sr, n_mels=80, hop_length=hop_length, win_length=win_length)
-            mel_spec = np.log1p(mel_spec)
-            spect = torch.FloatTensor(mel_spec)
-            
-            # STFT
-        else:
-            D = librosa.stft(y, n_fft=n_fft, hop_length=hop_length,
-                            win_length=win_length, window=self.window)
-                
-            spect, phase = librosa.magphase(D)
-            # S = log(S+1)
-            spect = np.log1p(spect)
-            spect = torch.FloatTensor(spect)
-        
+
+        #log mel feature
+        melspec = librosa.feature.melspectrogram(y, sr, n_fft=n_fft, hop_length=hop_length, n_mels=80)
+        logmelspec = librosa.power_to_db(melspec)
+
+        spect = torch.FloatTensor(logmelspec)
+
         if self.normalize:
             mean = spect.mean()
             std = spect.std()
@@ -95,6 +81,12 @@ class SpectrogramParser(AudioParser):
         
         if self.spec_augment:
             spect = spec_augment(spect)
+
+        if False:
+            path = './test_img'
+            os.makedirs(path, exist_ok=True)
+            matplotlib.image.imsave('./test_img/'+ audio_path[50:-4] +'name.png', spect)
+        
 
         return spect
 
@@ -151,7 +143,7 @@ def _collate_fn(batch):
         return len(p[1])
   
     seq_lengths = [len(s[0]) for s in batch]
-    target_lengths = [len(s[1]) for s in batch]
+    target_lengths = [len(s[1])-1 for s in batch] #eos lenth제거를 위해 -1 (rnn-t)
 
     max_seq_sample = max(batch, key=seq_length_)[0]
     max_target_sample = max(batch, key=target_length_)[1]

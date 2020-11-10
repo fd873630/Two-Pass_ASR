@@ -7,13 +7,11 @@ class JointNet(nn.Module):
     def __init__(self, input_size, inner_dim, vocab_size):
         super(JointNet, self).__init__()
 
-        self.forward_layer = nn.Linear(input_size, inner_dim, bias=True)
+        self.forward_layer = nn.Linear(input_size*2, inner_dim, bias=True)
 
         self.tanh = nn.Tanh()
         self.project_layer = nn.Linear(inner_dim, vocab_size, bias=True)
         
-        self.output_proj = nn.Linear(1024, 320, bias=True)
-
     def forward(self, enc_state, dec_state):
         if enc_state.dim() == 3 and dec_state.dim() == 3:
             dec_state = dec_state.unsqueeze(1)
@@ -38,18 +36,14 @@ class JointNet(nn.Module):
 
 
 class Transducer(nn.Module):
-    def __init__(self, encoder, decoder, input_size, inner_dim, vocab_size):
+    def __init__(self, encoder, decoder, joint, enc_hidden, enc_projection):
         super(Transducer, self).__init__()
         # define model
         self.encoder = encoder
         self.decoder = decoder
+        self.joint = joint
 
-        self.input_size = input_size
-        self.inner_dim = inner_dim
-        self.vocab_size = vocab_size
-
-        # define JointNet
-        self.joint = JointNet(input_size=self.input_size, inner_dim=self.inner_dim, vocab_size=self.vocab_size)
+        self.project_layer = nn.Linear(enc_hidden, enc_projection, bias=True)
 
     def forward(self, inputs, inputs_lengths, targets, targets_lengths):
         
@@ -57,9 +51,11 @@ class Transducer(nn.Module):
         if targets.is_cuda: zero = zero.cuda()
         
         targets_add_blank = torch.cat((zero, targets), dim=1)
-        
+
         enc_state, _ = self.encoder(inputs, inputs_lengths)
         
+        enc_state = self.project_layer(enc_state)
+
         dec_state, _ = self.decoder(targets_add_blank, targets_lengths+1)
         
         logits = self.joint(enc_state, dec_state)
