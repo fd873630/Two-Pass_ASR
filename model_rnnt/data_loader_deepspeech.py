@@ -61,7 +61,7 @@ class SpectrogramParser(AudioParser):
 
     def parse_audio(self, audio_path):
         
-        y,sr = librosa.load(audio_path, 16000)
+        y,sr = librosa.load(audio_path, self.sample_rate)
         
         n_fft = int(self.sample_rate * self.window_size)
         win_length = n_fft

@@ -246,6 +246,7 @@ def main():
     #학습된 enc 불러오기
     enc.load_state_dict(torch.load("/home/jhjeong/jiho_deep/two_pass/model_save/first_train_enc_save.pth"))
 
+    #enc 고정 시키기
     for param in enc.parameters():
         param.requires_grad = False
   
@@ -341,22 +342,22 @@ def main():
     for epoch in range(config.training.begin_epoch, config.training.end_epoch):
         print('{} 학습 시작'.format(datetime.datetime.now()))
         train_time = time.time()
-        train_loss, train_cer, _ = las_train(las_model, val_loader, las_optimizer, las_criterion, device)
+        train_loss, train_cer, _ = las_train(las_model, train_loader, las_optimizer, las_criterion, device)
         train_total_time = time.time()-train_time
         print('{} Epoch {} (Training) Loss {:.4f}, CER {:.2f}, time: {:.2f}'.format(datetime.datetime.now(), epoch+1, train_loss, train_cer, train_total_time))
         
         print('{} 평가 시작'.format(datetime.datetime.now()))
         eval_time = time.time()
-        val_loss, test_cer, _ = las_eval(las_model, train_loader, las_criterion, device)
+        val_loss, test_cer, _ = las_eval(las_model, val_loader, las_criterion, device)
         eval_total_time = time.time()-eval_time
         print('{} Epoch {} (val) Loss {:.4f}, CER {:.2f}, time: {:.2f}'.format(datetime.datetime.now(), epoch+1, val_loss, test_cer, eval_total_time))
 
         las_scheduler.step()
         
         with open("./second_step_train.txt", "a") as ff:
-            ff.write('Epoch %d (Training) Loss %0.4f CER %0.2f time %0.4f' % (epoch+1, train_loss, train_cer, train_total_time))
+            ff.write('Epoch %d (Training) Loss %0.4f CER %0.4f time %0.4f' % (epoch+1, train_loss, train_cer, train_total_time))
             ff.write('\n')
-            ff.write('Epoch %d (val) Loss %0.4f CER %0.2f time %0.4f ' % (epoch+1, val_loss, test_cer, eval_total_time))
+            ff.write('Epoch %d (val) Loss %0.4f CER %0.4f time %0.4f ' % (epoch+1, val_loss, test_cer, eval_total_time))
             ff.write('\n')
             ff.write('\n')
     
