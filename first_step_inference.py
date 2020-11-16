@@ -132,9 +132,6 @@ def inference(model, val_loader, device, beam_search):
             total_wer_len += wer_len
             total_cer_len += cer_len
 
-            final_wer = (total_wer / total_wer_len) * 100
-            final_cer = (total_cer / total_cer_len) * 100
-
             for a, b in zip(transcripts,preds):
                 chars = []
                 predic_chars = []
@@ -151,13 +148,15 @@ def inference(model, val_loader, device, beam_search):
                     f.write('\n')
                     f.write(moasseugi(predic_chars))
                     f.write('\n')
-                
+        
+    final_wer = (total_wer / total_wer_len) * 100
+    final_cer = (total_cer / total_cer_len) * 100  
 
     return final_wer, final_cer
 
 def main():
     
-    beam_mode = True
+    beam_mode = False
     yaml_name = "/home/jhjeong/jiho_deep/two_pass/label,csv/Two_Pass.yaml"
 
     configfile = open(yaml_name)

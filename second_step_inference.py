@@ -85,70 +85,7 @@ def load_label(label_path):
 
     return char2index, index2char
 
-def las_train(model, train_loader, optimizer, criterion, device, tf):
-    model.train()
-
-    eos_id = 54
-    total_loss = 0
-
-    total_cer = 0
-    total_wer = 0
-    
-    total_wer_len = 0
-    total_cer_len = 0
-
-    start_time = time.time()
-    total_batch_num = len(train_loader)
-    for i, data in enumerate(train_loader):
-        
-        optimizer.zero_grad()
-        inputs, targets, inputs_lengths, targets_lengths = data
-        
-        inputs_lengths = torch.IntTensor(inputs_lengths)
-        targets_lengths = torch.IntTensor(targets_lengths)
-
-        inputs = inputs.to(device) # (batch_size, time, freq)
-        targets = targets.to(device)
-        inputs_lengths = inputs_lengths.to(device)
-        targets_lengths = targets_lengths.to(device)
-
-        logits = model(inputs, inputs_lengths, targets, tf, False)
-        logits = torch.stack(logits, dim=1).to(device)
-                
-        hypothesis = logits.max(-1)[1]
-        hypothesis = hypothesis.squeeze()
-
-        wer, cer, wer_len, cer_len = compute_cer(hypothesis.cpu().numpy(),targets.cpu().numpy()) 
-
-        total_wer += wer
-        total_cer += cer
-                    
-        total_wer_len += wer_len
-        total_cer_len += cer_len
-        
-        loss = criterion(logits.contiguous().view(-1, logits.size(-1)), targets.contiguous().view(-1))
-
-        max_inputs_length = inputs_lengths.max().item()
-        max_targets_length = targets_lengths.max().item()
-        
-        total_loss += loss.item()
-
-        loss.backward()
-        optimizer.step()
-
-        if i % 1000 == 0:
-            print('{} train_batch: {:4d}/{:4d}, train_loss: {:.4f}, train_cer: {:.2f} train_time: {:.2f}'
-                  .format(datetime.datetime.now(), i, total_batch_num, loss.item(), (cer/cer_len)*100, time.time() - start_time))
-            start_time = time.time()
-
-    final_wer = (total_wer / total_wer_len) * 100
-    final_cer = (total_cer / total_cer_len) * 100
-
-    train_loss = total_loss / total_batch_num
-
-    return train_loss, final_cer, final_wer
-
-def las_eval(model, val_loader, criterion, device):
+def las_inference(model, val_loader, criterion, device):
     model.eval()
 
     eos_id = 54
@@ -159,6 +96,13 @@ def las_eval(model, val_loader, criterion, device):
     
     total_wer_len = 0
     total_cer_len = 0
+
+    with open("./second_inference.txt", "w") as f:
+        f.write('\n')
+        f.write("inference 시작")
+        f.write('\n')
+    
+    char2index, index2char = load_label('./label,csv/hangul.labels')
 
     start_time = time.time()
     total_batch_num = len(val_loader)
@@ -187,12 +131,29 @@ def las_eval(model, val_loader, criterion, device):
                     
             total_wer_len += wer_len
             total_cer_len += cer_len
-            
-            loss = criterion(logits.contiguous().view(-1, logits.size(-1)), targets.contiguous().view(-1))
 
-            total_loss += loss.item()
-    
-        val_loss = total_loss / total_batch_num
+            for a, b in zip(targets.cpu(), hypothesis.cpu()):
+                chars = []
+                predic_chars = []
+                
+                for w in a:
+                    if w.item() == 54: # eos
+                        break
+                    chars.append(index2char[w.item()])
+
+                for y in b:
+                    if y.item() == 54: # eos
+                        break
+                    predic_chars.append(index2char[y.item()])
+                
+                with open("./second_inference.txt", "a") as f:
+                    f.write('\n')
+                    f.write(moasseugi(chars))
+                    f.write('\n')
+                    f.write(moasseugi(predic_chars))
+                    f.write('\n')
+                
+    val_loss = total_loss / total_batch_num
 
     final_wer = (total_wer / total_wer_len) * 100
     final_cer = (total_cer / total_cer_len) * 100
@@ -202,13 +163,6 @@ def las_eval(model, val_loader, criterion, device):
 def main():
     
     yaml_name = "/home/jhjeong/jiho_deep/two_pass/label,csv/Two_Pass.yaml"
-
-    with open("./second_step_train.txt", "w") as f:
-        f.write(yaml_name)
-        f.write('\n')
-        f.write('\n')
-        f.write("학습 시작")
-        f.write('\n')
 
     configfile = open(yaml_name)
     config = AttrDict(yaml.load(configfile, Loader=yaml.FullLoader))
@@ -247,10 +201,6 @@ def main():
     
     #학습된 enc 불러오기
     enc.load_state_dict(torch.load("/home/jhjeong/jiho_deep/two_pass/model_save/first_train_enc_save.pth"))
-
-    #enc 고정 시키기
-    for param in enc.parameters():
-        param.requires_grad = False
   
     #Transcription Network
     rnnt_dec = BaseDecoder(embedding_size=config.model.rnn_t_dec.embedding_size,
@@ -285,9 +235,7 @@ def main():
                       dropout_p=config.model.dropout, 
                       device=device)
 
-    for param in las_dec.parameters():
-        param.data.uniform_(-0.08, 0.08) 
-    #las_dec.load_state_dict(torch.load("/home/jhjeong/jiho_deep/two_pass/model_save/second_las_dec_save_tf_0.8.pth"))
+    las_dec.load_state_dict(torch.load("/home/jhjeong/jiho_deep/two_pass/model_save/second_las_dec_save_tf_1.pth"))
 
     las_model = ListenAttendSpell(enc, las_dec)
     
@@ -311,23 +259,10 @@ def main():
                                  weight_decay=config.optim.weight_decay)
 
     las_scheduler = optim.lr_scheduler.MultiStepLR(las_optimizer, 
-                                                    milestones=config.optim.las_milestones, 
+                                                    milestones=config.optim.milestones, 
                                                     gamma=config.optim.decay_rate)
     
     #-------------------------- Data load --------------------------
-    #train dataset
-    train_dataset = SpectrogramDataset(audio_conf, 
-                                       config.data.train_path,
-                                       feature_type=config.audio_data.type, 
-                                       normalize=True, 
-                                       spec_augment=True)
-
-    train_loader = AudioDataLoader(dataset=train_dataset,
-                                    shuffle=True,
-                                    num_workers=config.data.num_workers,
-                                    batch_size=config.data.batch_size,
-                                    drop_last=True)
-    
     #val dataset
     val_dataset = SpectrogramDataset(audio_conf, 
                                      config.data.val_path, 
@@ -336,47 +271,26 @@ def main():
                                      spec_augment=False)
 
     val_loader = AudioDataLoader(dataset=val_dataset,
-                                 shuffle=True,
+                                 shuffle=False,
                                  num_workers=config.data.num_workers,
                                  batch_size=config.data.batch_size,
                                  drop_last=True)
 
     print(" ")
-    print("second step las를 학습합니다.")
+    print("second step inference를 학습합니다.")
     print(" ")
 
-    pre_test_cer = 100000
-    for epoch in range(config.training.begin_epoch, config.training.end_epoch):
-        tf = 1
-        print("tf = ", tf)
-        print('{} 학습 시작'.format(datetime.datetime.now()))
-        train_time = time.time()
-        train_loss, train_cer, _ = las_train(las_model, train_loader, las_optimizer, las_criterion, device, tf)
-        train_total_time = time.time() - train_time
-        print('{} Epoch {} (Training) Loss {:.4f}, CER {:.2f}, time: {:.2f}'.format(datetime.datetime.now(), epoch+1, train_loss, train_cer, train_total_time))
-        
-        print('{} 평가 시작'.format(datetime.datetime.now()))
-        eval_time = time.time()
-        val_loss, test_cer, _ = las_eval(las_model, val_loader, las_criterion, device)
-        eval_total_time = time.time() - eval_time
-        print('{} Epoch {} (val) Loss {:.4f}, CER {:.2f}, time: {:.2f}'.format(datetime.datetime.now(), epoch+1, val_loss, test_cer, eval_total_time))
-        
-        las_scheduler.step()
-        
-        with open("./second_step_train.txt", "a") as ff:
-            ff.write('Epoch %d (Training) Loss %0.4f CER %0.4f time %0.4f' % (epoch+1, train_loss, train_cer, train_total_time))
-            ff.write('\n')
-            ff.write('Epoch %d (val) Loss %0.4f CER %0.4f time %0.4f ' % (epoch+1, val_loss, test_cer, eval_total_time))
-            ff.write('\n')
-            ff.write('\n')
-        
-        if pre_test_cer > test_cer:
-            print("best model을 저장하였습니다.")
-            #torch.save(las_model.module.state_dict(), "./model_save/second_las_train_model_save.pth")
-            torch.save(las_dec.state_dict(), "./model_save/second_las_dec_save_tf_1.pth")
-            pre_test_cer = test_cer
+    print('{} 평가 시작'.format(datetime.datetime.now()))
+    eval_time = time.time()
+    _, cer, wer = las_inference(las_model, val_loader, las_criterion, device)
+    eval_total_time = time.time()-eval_time
+    
+    print("final_wer -> ")
+    print(wer)
+    print("final_cer -> ")
+    print(cer)
 
-        torch.save(las_dec.state_dict(), "./model_save/second_last_las_dec_save.pth")
+
 
 if __name__ == '__main__':
     main()

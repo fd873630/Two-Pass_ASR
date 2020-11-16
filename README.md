@@ -7,13 +7,13 @@
 |--------|-----|-------|------| 
 |B0|80-dimensional log-Mel features|KsponSpeech_val(길이 조절 데이터)|22.85|
 |B1|80-dimensional log-Mel features|KsponSpeech_val(길이 조절 데이터)|?|
-|E0|80-dimensional log-Mel features|KsponSpeech_val(길이 조절 데이터)|?|
+|E0|80-dimensional log-Mel features|KsponSpeech_val(길이 조절 데이터)|27.98|
 |E1|80-dimensional log-Mel features|KsponSpeech_val(길이 조절 데이터)|?|
 
-B0 : RNN-T only
-B1 : LAS only
-E0 : Frozen Shared Enc
-E1 : MWER
+* B0 : RNN-T only
+* B1 : LAS only
+* E0 : Frozen Shared Enc
+* E1 : MWER
 
 ## Intro
 한국어를 위한 Two-Pass End-to-End Speech Recognition입니다. 실시간 인식에는 attention기반의 모델보다 RNN-Transducer가 사용된다고 합니다. 하지만 기존의 Listen attend and Spell 보다 성능이 좋지 못합니다. 이 논문에서는 RNN-T와 LAS를 합쳐 성능과 실시간 인식률을 두마리의 토끼를 잡자는 컨셉의 논문입니다. 현재 git hub에는 Pytorch Two pass 코드와 성능결과가 없어 한국어 Two-pass를 구현하고 성능을 확인하였습니다.
