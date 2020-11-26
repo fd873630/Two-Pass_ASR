@@ -31,21 +31,21 @@ model:
 
   las_dec:
     type: lstm
-    max_length: 70
-    attention_head: 4
+    max_length: 55
+    attention_head: 2
     hidden_size: 1024
-    n_layers: 2
+    n_layers: 4
     embedding_size: 96
     projection_dim: 320
    
   joint:
     inner_dim: 320
   
-  vocab_size: 55
+  vocab_size: 54
   dropout: 0.3
 
 training:
-  begin_epoch: 0
+  begin_epoch: 2
   end_epoch: 100
 
 inference:
@@ -56,6 +56,6 @@ optim:
   lr: 0.0001
   weight_decay: 0.01
   milestones: [7, 14]
-  las_milestones: [5, 10]
+  las_milestones: [20, 25]
   decay_rate: 0.3333
 

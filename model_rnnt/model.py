@@ -2,6 +2,7 @@ import torch
 import torch.nn as nn
 import torch.nn.functional as F
 from torch import nn, autograd
+import math
 
 class JointNet(nn.Module):
     def __init__(self, input_size, inner_dim, vocab_size):
@@ -13,6 +14,7 @@ class JointNet(nn.Module):
         self.project_layer = nn.Linear(inner_dim, vocab_size, bias=True)
         
     def forward(self, enc_state, dec_state):
+        
         if enc_state.dim() == 3 and dec_state.dim() == 3:
             dec_state = dec_state.unsqueeze(1)
             enc_state = enc_state.unsqueeze(2)
@@ -118,23 +120,22 @@ class Transducer(nn.Module):
             #if use_gpu: label = label.cuda()
             
             label = torch.LongTensor([[label]])
-
             if use_gpu: label = label.cuda()
-
-            
             pred, hidden = self.decoder(inputs=label, hidden = hidden)
 
             return pred[0][0], hidden
-        
+
         B = [Sequence(blank=0)]
-        
+
+        #---------------------- input 작업 ----------------------------
         batch_size = inputs.size(0)
         enc_states, _ = self.encoder(inputs, inputs_length)
+
         enc_states = self.project_layer(enc_states)
         enc_states_for_beam = enc_states.squeeze()
         
-        prefix = False
-
+        prefix = True
+        
         for i, x in enumerate(enc_states_for_beam):
             sorted(B, key=lambda a: len(a.k), reverse=True)
             A = B
@@ -146,9 +147,13 @@ class Transducer(nn.Module):
                         if not isprefix(A[i].k, A[j].k): continue
                         
                         pred, _ = forward_step(A[i].k[-1], A[i].h)
+
+                        idx = len(A[i].k)
                         ytu = self.joint(x, pred)
+
                         logp = F.log_softmax(ytu, dim=0)
                         curlogp = A[i].logp + float(logp[A[j].k[idx]])
+
                         for k in range(idx, len(A[j].k)-1):
                             ytu = self.joint(x, A[j].g[k])
                             logp = F.log_softmax(ytu, dim=0)
@@ -156,15 +161,15 @@ class Transducer(nn.Module):
                         A[j].logp = log_aplusb(A[j].logp, curlogp)
 
             while True:
-                y_hat = max(A, key=lambda a: a.logp)
-                A.remove(y_hat)
-                #print(y_hat.k) #첫번째 0
-                #print(y_hat.h) #첫번째 none
-                
-                pred, hidden = forward_step(y_hat.k[-1], y_hat.h)
-                ytu = self.joint(x, pred)
+                y_hat = max(A, key=lambda a: a.logp) # y* = most probable in A
+                A.remove(y_hat) # remove y* from A
 
-                logp = F.log_softmax(ytu, dim=0)
+                # calculate P(k|y_hat, t)
+                # get last label and hidden state
+                pred, hidden = forward_step(y_hat.k[-1], y_hat.h)               
+                ytu = self.joint(x, pred) # x는 input
+
+                logp = F.log_softmax(ytu, dim=0) # log probability for each k
                 
                 for k in range(len(logp)):
                     yk = Sequence(y_hat)
@@ -174,22 +179,117 @@ class Transducer(nn.Module):
                     if k == 0:
                         B.append(yk)                        
                         continue
-
-                    yk.h = hidden; yk.k.append(k); 
                     
+                    # store prediction distribution and last hidden state
+                    # yk.h.append(hidden); yk.k.append(k)
+                    yk.h = hidden; yk.k.append(k); 
                     
                     if prefix: yk.g.append(pred)
                     
                     A.append(yk)
 
-                y_hat = max(A, key=lambda a: a.logp)               
+                y_hat = max(A, key=lambda a: a.logp)   
+
+                yb = max(B, key=lambda a: a.logp)
+
+                if len(B) >= W and yb.logp >= y_hat.logp: break
+                
+            sorted(B, key=lambda a: a.logp, reverse=True)
+            
+        return B[0].k, -B[0].logp
+
+    def MCER_beam_search(self, inputs, inputs_length, W): 
+        use_gpu = inputs.is_cuda
+        def isprefix(a, b):
+            # a is the prefix of b
+            if a == b or len(a) >= len(b): return False
+            for i in range(len(a)):
+                if a[i] != b[i]: return False
+            return True
+
+        def forward_step(label, hidden):
+            #if use_gpu: label = label.cuda()
+            
+            label = torch.LongTensor([[label]])
+            if use_gpu: label = label.cuda()
+            pred, hidden = self.decoder(inputs=label, hidden = hidden)
+
+            return pred[0][0], hidden
+        
+        B = [Sequence(blank=0)]
+        
+        #---------------------- input 작업 ----------------------------
+        batch_size = inputs.size(0)
+        enc_states, _ = self.encoder(inputs, inputs_length)
+        
+        enc_states = self.project_layer(enc_states)
+        enc_states_for_beam = enc_states.squeeze()
+        
+        prefix = True
+        
+        for i, x in enumerate(enc_states_for_beam):
+            sorted(B, key=lambda a: len(a.k), reverse=True)
+            A = B
+            B = []
+
+            if prefix:
+                for j in range(len(A)-1):
+                    for i in range(j+1, len(A)):
+                        if not isprefix(A[i].k, A[j].k): continue
+                        
+                        pred, _ = forward_step(A[i].k[-1], A[i].h)
+
+                        idx = len(A[i].k)
+                        ytu = self.joint(x, pred)
+
+                        logp = F.log_softmax(ytu, dim=0)
+                        curlogp = A[i].logp + float(logp[A[j].k[idx]])
+
+                        for k in range(idx, len(A[j].k)-1):
+                            ytu = self.joint(x, A[j].g[k])
+                            logp = F.log_softmax(ytu, dim=0)
+                            curlogp += float(logp[A[j].k[k+1]])
+                        A[j].logp = log_aplusb(A[j].logp, curlogp)
+
+            while True:
+                y_hat = max(A, key=lambda a: a.logp) # y* = most probable in A
+                A.remove(y_hat) # remove y* from A
+
+                # calculate P(k|y_hat, t)
+                # get last label and hidden state
+                pred, hidden = forward_step(y_hat.k[-1], y_hat.h)               
+                ytu = self.joint(x, pred) # x는 input
+
+                logp = F.log_softmax(ytu, dim=0) # log probability for each k
+                for k in range(len(logp)):
+                    yk = Sequence(y_hat)
+
+                    yk.logp += float(logp[k])
+                    
+                    if k == 0:
+                        B.append(yk)                        
+                        continue
+                    
+                    # store prediction distribution and last hidden state
+                    # yk.h.append(hidden); yk.k.append(k)
+                    yk.h = hidden; yk.k.append(k); 
+                    
+                    if prefix: yk.g.append(pred)
+                    
+                    A.append(yk)
+
+                y_hat = max(A, key=lambda a: a.logp)   
+
                 yb = max(B, key=lambda a: a.logp)
 
                 if len(B) >= W and yb.logp >= y_hat.logp: break
                 
             sorted(B, key=lambda a: a.logp, reverse=True)
 
-        return B[0].k, -B[0].logp
+        return B # B[0].k
+
+def log_aplusb(a, b):
+    return max(a, b) + math.log1p(math.exp(-math.fabs(a-b)))
 
 class Sequence():
     def __init__(self, seq=None, blank=0):
@@ -199,6 +299,7 @@ class Sequence():
             # self.h = [None] # input hidden vector to phoneme model
             self.h = None
             self.logp = 0 # probability of this sequence, in log scale
+
         else:
             self.g = seq.g[:] # save for prefixsum
             self.k = seq.k[:]

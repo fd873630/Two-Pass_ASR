@@ -5,15 +5,15 @@
 
 |Strategy|Feature|Dataset|CER|  
 |--------|-----|-------|------| 
-|B0|80-dimensional log-Mel features|KsponSpeech_val(길이 조절 데이터)|22.85|
+|B0|80-dimensional log-Mel features|KsponSpeech_val(길이 조절 데이터)|17.32|
 |B1|80-dimensional log-Mel features|KsponSpeech_val(길이 조절 데이터)|?|
 |E0|80-dimensional log-Mel features|KsponSpeech_val(길이 조절 데이터)|27.98|
-|E1|80-dimensional log-Mel features|KsponSpeech_val(길이 조절 데이터)|?|
 
-* B0 : RNN-T only
+
+* B0 : RNN-T only(beam_mode)
 * B1 : LAS only
-* E0 : Frozen Shared Enc
-* E1 : MWER
+* E0 : 2nd Beam Search
+* E1 : Rescoring
 
 ## Intro
 한국어를 위한 Two-Pass End-to-End Speech Recognition입니다. 실시간 인식에는 attention기반의 모델보다 RNN-Transducer가 사용된다고 합니다. 하지만 기존의 Listen attend and Spell 보다 성능이 좋지 못합니다. 이 논문에서는 RNN-T와 LAS를 합쳐 성능과 실시간 인식률을 두마리의 토끼를 잡자는 컨셉의 논문입니다. 현재 git hub에는 Pytorch Two pass 코드와 성능결과가 없어 한국어 Two-pass를 구현하고 성능을 확인하였습니다.
@@ -34,15 +34,15 @@ AI Hub 한국어 음성 데이터 : http://www.aihub.or.kr/aidata/105
 
 ### Data format
 * 음성 데이터 : 16bit, mono 16k sampling WAV audio
-* 정답 스크립트 : 제공된 스크립트를 자소로 변환된 정답
+* 정답 스크립트 : 제공된 스크립트를 자소로 변환된 정답 -> 공백(띄어쓰기) 제거
   ```js
-  1. "b/ (70%)/(칠 십 퍼센트) 확률이라니 " => "칠 십 퍼센트 확률이라니" 
+  1. "b/ (70%)/(칠 십 퍼센트) 확률이라니 " => "칠십퍼센트확률이라니" 
   
-  2. "칠 십 퍼센트 확률이라니" => "ㅊㅣㄹ ㅅㅣㅂ ㅍㅓㅅㅔㄴㅌㅡ ㅎㅘㄱㄹㅠㄹㅇㅣㄹㅏㄴㅣ"
+  2. "칠십퍼센트확률이라니" => "ㅊㅣㄹㅅㅣㅂㅍㅓㅅㅔㄴㅌㅡㅎㅘㄱㄹㅠㄹㅇㅣㄹㅏㄴㅣ"
 
-  3. "ㅊㅣㄹ ㅅㅣㅂ ㅍㅓㅅㅔㄴㅌㅡ ㅎㅘㄱㄹㅠㄹㅇㅣㄹㅏㄴㅣ" => "16 41 7 1 11 41 9 1 19 25 11 26 4 18 39 ..."
+  3. "ㅊㅣㄹㅅㅣㅂㅍㅓㅅㅔㄴㅌㅡㅎㅘㄱㄹㅠㄹㅇㅣㄹㅏㄴㅣ" => "16 41 7 1 11 41 9 1 19 25 11 26 4 18 39 ..."
   
-  최종:  "b/ (70%)/(칠 십 퍼센트) 확률이라니 " => "16 41 7 1 11 41 9 1 19 25 11 26 4 18 39 ..."
+  최종:  "b/(70%)/(칠십퍼센트)확률이라니 " => "16 41 7 1 11 41 9 1 19 25 11 26 4 18 39 ..."
   ```
 
 1. 위의 txt 전처리는 https://github.com/sooftware/KoSpeech/wiki/Preparation-before-Training 다음을 참고하였습니다.
@@ -83,12 +83,11 @@ AI Hub 한국어 음성 데이터 : http://www.aihub.or.kr/aidata/105
   ```
   #id\char 
   0   _
-  1    
-  2   ㄱ
+  1   ㄱ
   ...
-  52   ㅄ
-  53   <s>
-  54   </s>
+  51   ㅄ
+  52   <s>
+  53   </s>
   ```
 
 ## Model

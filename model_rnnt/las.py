@@ -4,15 +4,20 @@ from torch import Tensor
 
 class ListenAttendSpell(nn.Module):
 
-    def __init__(self, encoder, decoder):
+    def __init__(self, encoder, decoder, mode):
         super(ListenAttendSpell, self).__init__()
         self.encoder = encoder
         self.decoder = decoder
+        self.mode = mode
 
     def forward(self, inputs, input_lengths, targets, teacher_forcing_ratio, return_decode_dict):
-        
-        output, hidden = self.encoder(inputs, input_lengths)
-        
-        result = self.decoder(targets, output, teacher_forcing_ratio, return_decode_dict)
+        enc_state, hidden = self.encoder(inputs, input_lengths)
+        result2= []
+        output_sequence = []
 
-        return result
+        if self.mode: # beam search inference
+            result = self.decoder(targets, enc_state, 5)
+        else:
+            result, output_sequence, result2 = self.decoder(targets, enc_state, teacher_forcing_ratio, return_decode_dict)
+        
+        return result, output_sequence, result2

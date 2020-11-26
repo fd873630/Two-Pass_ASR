@@ -120,8 +120,8 @@ class SpectrogramDataset(Dataset, SpectrogramParser):
             transcript = f.read()
             transcript = transcript.strip().split(' ')
             transcript = list(map(int, transcript))
-            transcript.append(54)           
-
+            transcript.append(53)           
+            
         return transcript
 
     def __len__(self):
@@ -164,6 +164,7 @@ def _collate_fn(batch):
         tensor = sample[0]
         target = sample[1]
         seq_length = tensor.size(0)
+
         seqs[x].narrow(0, 0, seq_length).copy_(tensor)
         targets[x].narrow(0, 0, len(target)).copy_(torch.LongTensor(target))
 

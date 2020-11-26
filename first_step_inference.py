@@ -43,21 +43,15 @@ def compute_cer(preds, labels):
         for b in pred:
             units_pred.append(index2char[b])
 
-
         label = moasseugi(units)
         pred = moasseugi(units_pred)
-    
-        wer = eval_wer(pred, label)
+
         cer = eval_cer(pred, label)
-        
-        wer_len = len(label.split())
         cer_len = len(label.replace(" ", ""))
 
-        total_wer += wer
         total_cer += cer
-
-        total_wer_len += wer_len
         total_cer_len += cer_len
+
 
     return total_wer, total_cer, total_wer_len, total_cer_len
 
@@ -114,9 +108,11 @@ def inference(model, val_loader, device, beam_search):
             transcripts = [targets.cpu().numpy()[i][:targets_lengths[i].item()]
                        for i in range(targets.size(0))]
             
+            begin_time = time.time()
             if beam_search:
                 preds, _ = model.beam_search(inputs, inputs_lengths, W=5)
                 preds = preds[1:]
+
                 wow = []
                 wow.append(preds)
                 
@@ -124,12 +120,9 @@ def inference(model, val_loader, device, beam_search):
             else:
                 preds = model.recognize(inputs, inputs_lengths)
 
-            wer, cer, wer_len, cer_len = compute_cer(preds, transcripts)
-            
-            total_wer += wer
+            _, cer, _, cer_len = compute_cer(preds, transcripts)
+     
             total_cer += cer
-                
-            total_wer_len += wer_len
             total_cer_len += cer_len
 
             for a, b in zip(transcripts,preds):
@@ -148,15 +141,13 @@ def inference(model, val_loader, device, beam_search):
                     f.write('\n')
                     f.write(moasseugi(predic_chars))
                     f.write('\n')
-        
-    final_wer = (total_wer / total_wer_len) * 100
+
     final_cer = (total_cer / total_cer_len) * 100  
 
-    return final_wer, final_cer
+    return final_cer
 
 def main():
-    
-    beam_mode = False
+    beam_mode = True
     yaml_name = "/home/jhjeong/jiho_deep/two_pass/label,csv/Two_Pass.yaml"
 
     configfile = open(yaml_name)
@@ -184,6 +175,7 @@ def main():
 
     cuda = torch.cuda.is_available()
     device = torch.device('cuda' if cuda else 'cpu')
+    #device = torch.device('cpu')
 
     #-------------------------- Model Initialize --------------------------
     #Prediction Network
@@ -193,7 +185,9 @@ def main():
                       n_layers=config.model.enc.n_layers, 
                       dropout=config.model.dropout, 
                       bidirectional=config.model.enc.bidirectional)
-    
+
+    #enc.load_state_dict(torch.load("./model_test_save/enc.pth"))
+
     #Transcription Network
     rnnt_dec = BaseDecoder(embedding_size=config.model.rnn_t_dec.embedding_size,
                            hidden_size=config.model.rnn_t_dec.hidden_size, 
@@ -202,10 +196,14 @@ def main():
                            n_layers=config.model.rnn_t_dec.n_layers, 
                            dropout=config.model.dropout)
 
+    #rnnt_dec.load_state_dict(torch.load("./model_test_save/rnnt_dec.pth"))
+
     #Joint Network
     joint = JointNet(input_size=config.model.enc.output_size, 
                      inner_dim=config.model.joint.inner_dim, 
                      vocab_size=config.model.vocab_size)
+
+    #joint.load_state_dict(torch.load("./model_test_save/joint.pth"))
 
     #Transducer
     rnnt_model = Transducer(encoder=enc, 
@@ -214,9 +212,11 @@ def main():
                             enc_hidden=config.model.enc.hidden_size,
                             enc_projection=config.model.enc.output_size) 
 
-    rnnt_model.load_state_dict(torch.load("/home/jhjeong/jiho_deep/two_pass/model_save/first_train_model_save.pth"))
+    rnnt_model.load_state_dict(torch.load("/home/jhjeong/jiho_deep/two_pass/model_save/first_train_model_save_no_blank.pth"))
 
+    #rnnt_model.load_state_dict(torch.load("/home/jhjeong/jiho_deep/two_pass/model_save/first_train_model_save.pth"))
     rnnt_model = rnnt_model.to(device)
+    #rnnt_model = nn.DataParallel(rnnt_model).to(device)
     
     val_dataset = SpectrogramDataset(audio_conf, 
                                      config.data.val_path, 
@@ -228,21 +228,19 @@ def main():
                                  shuffle=False,
                                  num_workers=config.data.num_workers,
                                  batch_size=1,
-                                 drop_last=False)
+                                 drop_last=True)
     
     print(" ")
     print('{} first step inference 시작'.format(datetime.datetime.now()))
     print(" ")
     
-    final_wer, final_cer = inference(rnnt_model, val_loader, device, beam_mode)
+    final_cer = inference(rnnt_model, val_loader, device, beam_mode)
 
-    print("final_wer -> ")
-    print(final_wer)
     print("final_cer -> ")
     print(final_cer)
     
     print('{} inference 끝'.format(datetime.datetime.now()))
-
+    
 if __name__ == '__main__':
     main()
     

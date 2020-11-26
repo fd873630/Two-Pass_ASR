@@ -46,7 +46,7 @@ def load_label(label_path):
 def rnnt_train(model, train_loader, optimizer, criterion, device):
     model.train()
 
-    eos_id = 54
+    eos_id = 53
     total_loss = 0
     start_time = time.time()
     total_batch_num = len(train_loader)
@@ -87,7 +87,7 @@ def rnnt_train(model, train_loader, optimizer, criterion, device):
 def rnnt_eval(model, val_loader, criterion, device):
     model.eval()
 
-    eos_id = 54
+    eos_id = 53
     total_loss = 0
     total_batch_num = len(val_loader)
     with torch.no_grad():
@@ -159,6 +159,8 @@ def main():
                       dropout=config.model.dropout, 
                       bidirectional=config.model.enc.bidirectional)
     
+    for param in enc.parameters():
+        param.data.uniform_(-0.08, 0.08)
     #enc.load_state_dict(torch.load("/home/jhjeong/jiho_deep/two_pass/model_save/first_train_enc_save.pth"))
 
     #Transcription Network
@@ -168,11 +170,17 @@ def main():
                            output_size=config.model.rnn_t_dec.output_size, 
                            n_layers=config.model.rnn_t_dec.n_layers, 
                            dropout=config.model.dropout)
+   
+    for param in rnnt_dec.parameters():
+        param.data.uniform_(-0.08, 0.08)
 
     #Joint Network
     joint = JointNet(input_size=config.model.enc.output_size, 
                      inner_dim=config.model.joint.inner_dim, 
                      vocab_size=config.model.vocab_size)
+    
+    for param in joint.parameters():
+        param.data.uniform_(-0.08, 0.08)
 
     #Transducer
     rnnt_model = Transducer(encoder=enc, 
@@ -181,6 +189,9 @@ def main():
                             enc_hidden=config.model.enc.hidden_size,
                             enc_projection=config.model.enc.output_size) 
     
+    for param in rnnt_model.parameters():
+        param.data.uniform_(-0.08, 0.08)
+
     #rnnt_model.load_state_dict(torch.load("/home/jhjeong/jiho_deep/two_pass/model_save/first_train_model_save.pth"))
 
     #-------------------------- Loss Initialize --------------------------
@@ -260,9 +271,11 @@ def main():
         
         if pre_val_loss > val_loss:
             print("best model을 저장하였습니다.")
-            torch.save(rnnt_model.module.state_dict(), "./model_save/first_train_model_save.pth")
-            torch.save(enc.state_dict(), "./model_save/first_train_enc_save.pth")
+            torch.save(rnnt_model.module.state_dict(), "./model_save/first_train_model_save_no_blank.pth")
+            torch.save(enc.state_dict(), "./model_save/first_train_enc_save_no_blank.pth")
             pre_val_loss = val_loss
-    
+
+        torch.save(rnnt_model.module.state_dict(), "./model_save/first_train_model_save_no_blank_end.pth")
+        torch.save(enc.state_dict(), "./model_save/first_train_enc_save_no_blank_end.pth")
 if __name__ == '__main__':
     main()
