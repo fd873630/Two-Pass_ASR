@@ -32,9 +32,9 @@ model:
   las_dec:
     type: lstm
     max_length: 55
-    attention_head: 2
+    attention_head: 4
     hidden_size: 1024
-    n_layers: 4
+    n_layers: 2
     embedding_size: 96
     projection_dim: 320
    
@@ -45,7 +45,7 @@ model:
   dropout: 0.3
 
 training:
-  begin_epoch: 2
+  begin_epoch: 0
   end_epoch: 100
 
 inference:

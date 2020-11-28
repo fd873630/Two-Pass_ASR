@@ -44,14 +44,17 @@ class Speller(nn.Module):
         embedded = self.embedding(input_var)
         embedded = self.input_dropout(embedded)
         
+        #if self.training:
+        
         self.rnn.flatten_parameters()
 
         output, hidden = self.rnn(embedded, hidden)
         output = output.transpose(0, 1).contiguous()
         
         encoder_outputs = encoder_outputs.transpose(0, 1)
+
         context, attn = self.attention(output, encoder_outputs, encoder_outputs)
-    
+
         context = context.transpose(0, 1).contiguous()
         output = self.projection(context)
         

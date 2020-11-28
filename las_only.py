@@ -153,12 +153,12 @@ def las_train(model, train_loader, optimizer, criterion, device, tf):
 
         if i % 1000 == 0:
             print('{} train_batch: {:4d}/{:4d}, train_loss: {:.4f}, train_cer: {:.2f} train_time: {:.2f}'
-                  .format(datetime.datetime.now(), i, total_batch_num, total_loss/total_num, (cer/cer_len)*100, time.time() - start_time))
+                  .format(datetime.datetime.now(), i, total_batch_num, loss.item(), (cer/cer_len)*100, time.time() - start_time))
             start_time = time.time()
 
     final_cer = (total_cer / total_cer_len) * 100
 
-    train_loss = total_loss / total_num
+    train_loss = total_loss / total_batch_num
 
     return train_loss, final_cer
 
@@ -190,7 +190,7 @@ def las_eval(model, val_loader, criterion, device):
             targets_lengths = targets_lengths.to(device)
 
             
-            logits, _, _ = model(inputs, inputs_lengths, targets, 1, False)
+            logits, _, _ = model(inputs, inputs_lengths, targets, 0, False)
             logits = torch.stack(logits, dim=1).to(device)
 
             hypothesis = logits.max(-1)[1]
@@ -205,7 +205,7 @@ def las_eval(model, val_loader, criterion, device):
 
             total_loss += loss.item()
     
-        val_loss = total_loss / total_num
+        val_loss = total_loss / total_batch_num
 
     final_cer = (total_cer / total_cer_len) * 100
 
@@ -215,7 +215,7 @@ def main():
     
     yaml_name = "/home/jhjeong/jiho_deep/two_pass/label,csv/Two_Pass.yaml"
 
-    with open("./second_step_train.txt", "w") as f:
+    with open("./las_only_train.txt", "w") as f:
         f.write(yaml_name)
         f.write('\n')
         f.write('\n')
@@ -257,13 +257,9 @@ def main():
                       dropout=config.model.dropout, 
                       bidirectional=config.model.enc.bidirectional)
     
-    #학습된 enc 불러오기
-    enc.load_state_dict(torch.load("/home/jhjeong/jiho_deep/two_pass/model_save/first_train_enc_save_no_blank.pth"))
-    
-    #enc 고정 시키기
-    for param in enc.parameters():
-        param.requires_grad = False
-  
+    for param1 in enc.parameters():
+        param1.data.uniform_(-0.08, 0.08) 
+
     las_dec = Speller(vocab_size=config.model.vocab_size,
                       embedding_size=config.model.las_dec.embedding_size,
                       max_length=config.model.las_dec.max_length, 
@@ -280,21 +276,19 @@ def main():
     
     for param in las_dec.parameters():
         param.data.uniform_(-0.08, 0.08) 
-    
-    las_dec.load_state_dict(torch.load("/home/jhjeong/jiho_deep/two_pass/model_save/second_last_las_dec_save_no_blank_end2.pth"))
-
+       
     las_model = ListenAttendSpell(enc, las_dec, "False").to(device)
     las_model = nn.DataParallel(las_model).to(device)
 
     #-------------------------- Loss Initialize --------------------------
 
-    #las_criterion = nn.CrossEntropyLoss(ignore_index=0).to(device)
-    las_criterion = LabelSmoothingLoss(vocab_size=config.model.vocab_size, ignore_index=0, smoothing=0.1)
+    las_criterion = nn.CrossEntropyLoss(ignore_index=0).to(device)
+    #las_criterion = LabelSmoothingLoss(vocab_size=config.model.vocab_size, ignore_index=0, smoothing=0.1)
     
     #-------------------- Model Pararllel & Optimizer --------------------
     
     las_optimizer = optim.AdamW(las_model.module.parameters(), 
-                                 lr=config.optim.lr * 0.333, 
+                                 lr=config.optim.lr, 
                                  weight_decay=config.optim.weight_decay)
     '''
     las_optimizer = optim.Adam(las_model.module.parameters(), 
@@ -316,7 +310,7 @@ def main():
     train_loader = AudioDataLoader(dataset=train_dataset,
                                     shuffle=True,
                                     num_workers=config.data.num_workers,
-                                    batch_size=32,
+                                    batch_size=28,
                                     drop_last=True)
     
     #val dataset
@@ -329,18 +323,28 @@ def main():
     val_loader = AudioDataLoader(dataset=val_dataset,
                                  shuffle=True,
                                  num_workers=config.data.num_workers,
-                                 batch_size=32,
+                                 batch_size=28,
                                  drop_last=True)
 
     print(" ")
-    print("second step las를 학습합니다.")
+    print("las_only 를 학습합니다.")
     print(" ")
 
     pre_test_cer = 100000
+    pre_test_loss = 100000
     for epoch in range(config.training.begin_epoch, config.training.end_epoch):
         for param_group in las_optimizer.param_groups:
             print("lr = ", param_group['lr'])
-        tf = 1
+
+        if epoch < 3:
+            tf = 1
+
+        elif epoch < 10:
+            tf = epoch * (-1/20) + 23/20
+        
+        else:
+            tf = 0.6
+        
         print("tf = ", tf)
         print('{} 학습 시작'.format(datetime.datetime.now()))
         train_time = time.time()
@@ -356,7 +360,7 @@ def main():
         
         #las_scheduler.step()
         
-        with open("./second_step_train.txt", "a") as ff:
+        with open("./las_only_train.txt", "a") as ff:
             ff.write('tf = %0.4f' % (tf))
             ff.write('\n')
             ff.write('Epoch %d (Training) Loss %0.4f CER %0.4f time %0.4f' % (epoch+1, train_loss, train_cer, train_total_time))
@@ -365,13 +369,17 @@ def main():
             ff.write('\n')
             ff.write('\n')
         
-        if pre_test_cer > test_cer:
+        if pre_test_loss > val_loss:
             print("best model을 저장하였습니다.")
-            #torch.save(las_model.module.state_dict(), "./model_save/second_las_train_model_save.pth")
-            torch.save(las_dec.state_dict(), "./model_save/second_las_dec_save_no_blank3.pth")
-            pre_test_cer = test_cer
+            torch.save(las_model.module.state_dict(), "./model_save/las_model_save.pth")
+            torch.save(las_dec.state_dict(), "./model_save/las_model_las_dec.pth")
+            torch.save(enc.state_dict(), "./model_save/las_model_enc.pth")
+            pre_test_loss = val_loss
 
-        torch.save(las_dec.state_dict(), "./model_save/second_last_las_dec_save_no_blank_end3.pth")
+        torch.save(las_model.module.state_dict(), "./model_save/las_model_save_end.pth")
+        torch.save(las_dec.state_dict(), "./model_save/las_model_las_dec.pth")
+        torch.save(enc.state_dict(), "./model_save/las_model_enc.pth")
+        #torch.save(las_dec.state_dict(), "./model_save/second_last_las_dec_save_no_blank_end3.pth")
 
 if __name__ == '__main__':
     main()

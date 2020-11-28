@@ -7,24 +7,33 @@
 |--------|-----|-------|------| 
 |B0|80-dimensional log-Mel features|KsponSpeech_val(길이 조절 데이터)|17.32|
 |B1|80-dimensional log-Mel features|KsponSpeech_val(길이 조절 데이터)|?|
-|E0|80-dimensional log-Mel features|KsponSpeech_val(길이 조절 데이터)|27.98|
+|E0|80-dimensional log-Mel features|KsponSpeech_val(길이 조절 데이터)|?|
+|E1|80-dimensional log-Mel features|KsponSpeech_val(길이 조절 데이터)|?|
 
 
-* B0 : RNN-T only(beam_mode)
-* B1 : LAS only
-* E0 : 2nd Beam Search
-* E1 : Rescoring
+* B0 : RNN-T only(beam mode)
+* B1 : LAS only(beam mode)
+* E0 : 2nd Beam Search(beam mode)
+* E1 : Rescoring(beam mode)
 
 ## Intro
 한국어를 위한 Two-Pass End-to-End Speech Recognition입니다. 실시간 인식에는 attention기반의 모델보다 RNN-Transducer가 사용된다고 합니다. 하지만 기존의 Listen attend and Spell 보다 성능이 좋지 못합니다. 이 논문에서는 RNN-T와 LAS를 합쳐 성능과 실시간 인식률을 두마리의 토끼를 잡자는 컨셉의 논문입니다. 현재 git hub에는 Pytorch Two pass 코드와 성능결과가 없어 한국어 Two-pass를 구현하고 성능을 확인하였습니다.
 
-## Version
-* torch version = 1.2.0
-* Cuda compilation tools, release 9.1, V9.1.85
-* nn.DataParallel를 통해 multi GPU 학습
-
 ## How to install RNN-T Loss
 * https://github.com/HawkAaron/warp-transducer/tree/master/pytorch_binding
+
+## Training(Combined Loss)
+### First step
+* RNN-T model 을 학습합니다.
+-> first_step.py
+
+### Second step
+* Frist step에서 학습된 encoder를 고정 시키고 LAS decoder를 학습합니다.
+-> Second_step.py
+
+### Third step
+* "Deep fine tuning" shared encoder와 RNN-T decoder, LAS decoder를 같이 학습시킨다.
+-> not yet
 
 ## Data
 ### Dataset information
@@ -137,7 +146,6 @@ AI Hub 한국어 음성 데이터 : http://www.aihub.or.kr/aidata/105
 * State-of-the-art Speech Recognition With Sequence-to-Sequence Models (https://arxiv.org/abs/1712.01769)
 * Minimum Word Error Rate Training for Attention-based Sequence-to-Sequence Models (https://arxiv.org/abs/1712.01818)
 
-
 ### Blog References
 * https://gigglehd.com/zbxe/14052329
 * https://dos-tacos.github.io/paper%20review/sequence-transduction-with-rnn/
@@ -148,18 +156,27 @@ AI Hub 한국어 음성 데이터 : http://www.aihub.or.kr/aidata/105
 ## computer power
 * NVIDIA TITAN Xp * 4
 
-## Q & A
-Q1 : (Data set part) KsponSpeech_val(길이 조절 데이터)은 왜 따로 나눴는지?
+## Version
+* torch version = 1.2.0
+* Cuda compilation tools, release 9.1, V9.1.85
+* nn.DataParallel를 통해 multi GPU 학습
 
-A1 : RNN-T는 RNN-T Loss를 사용합니다. 그러므로 wav len과 script len에 따라서 시간과 메모리를 잡아 먹습니다. KsponSpeech_eval_clean의 데이터를 wav len과 script len은 특정 길이로 제한하게 되면 데이터의 양이 너무 적어 학습 데이터에서 5시간을 분리했습니다.
+## Q & A
+Q1 : (Training part) Two Pass의 main concept은 MWER training인데 이건 구현 안했는지?
+
+A1 : MWER의 컨셉을 통해서 제가 직접 MCER로 구현하려고 진행하였지만 RNN-T decoding부분에서 Beam search를 batch로 구현하기 힘들었습니다. 이로 인해 multi gpu도 사용하지 못하게 되어 시간이 오래걸리는 단점이 있어서 구현하긴 했지만 너무 학습에 시간이 오래걸려 추가하지 않았습니다. 추후에 공부하고 개선하여 추가하도록 하겠습니다 ㅠㅠ
+
+Q2 : (Data set part) KsponSpeech_val(길이 조절 데이터)은 왜 따로 나눴는지?
+
+A2 : RNN-T는 RNN-T Loss를 사용합니다. 그러므로 wav len과 script len에 따라서 시간과 메모리를 잡아 먹습니다. KsponSpeech_eval_clean의 데이터를 wav len과 script len은 특정 길이로 제한하게 되면 데이터의 양이 너무 적어 학습 데이터에서 5시간을 분리했습니다.
 
 * train data 총 길이 - 약 254시간 
 * val data 총 길이 - 약 5시간 
 * KsponSpeech_eval_clean(AI_hub eval 데이터) - 약 2.6시간
 
-Q2 : (labels part) 왜 음절 단위 말고 자소 단위로 나눴는지?
+Q3 : (labels part) 왜 음절 단위 말고 자소 단위로 나눴는지?
 
-A2 : RNN-T Loss wav len과 script len뿐만 아니라 vocab size도 메모리를 잡아 먹습니다.즉 vocab size가 증가 할 수록 메모리를 많이 잡아 먹기 때문에 학습에서 gpu 메모리 이득을 보기 위해 다음과 같이 사용하였습니다. (gpu 메모리가 여유가 있으시면 음절 단위로 해보셔도 좋을것 같습니다.)
+A3 : RNN-T Loss wav len과 script len뿐만 아니라 vocab size도 메모리를 잡아 먹습니다.즉 vocab size가 증가 할 수록 메모리를 많이 잡아 먹기 때문에 학습에서 gpu 메모리 이득을 보기 위해 다음과 같이 사용하였습니다. (gpu 메모리가 여유가 있으시면 음절 단위로 해보셔도 좋을것 같습니다.)
 
 
 ## Contacts
@@ -168,7 +185,3 @@ A2 : RNN-T Loss wav len과 script len뿐만 아니라 vocab size도 메모리를
 fd873630@naver.com로 메일주시면 최대한 빨리 답장드리겠습니다.
 
 인하대학교 전자공학과 4학년 정지호
-
-
-
-

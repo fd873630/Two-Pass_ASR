@@ -1,3 +1,0 @@
-/home/jhjeong/jiho_deep/two_pass/label,csv/Two_Pass.yaml
-
-학습 시작

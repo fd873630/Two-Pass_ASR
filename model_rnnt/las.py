@@ -15,8 +15,12 @@ class ListenAttendSpell(nn.Module):
         result2= []
         output_sequence = []
 
-        if self.mode: # beam search inference
+        if self.mode == "2nd_beam": # beam search inference
             result = self.decoder(targets, enc_state, 5)
+
+        elif self.mode == "res":
+            result = self.decoder(inputs, input_lengths, targets, enc_state, 1)
+        
         else:
             result, output_sequence, result2 = self.decoder(targets, enc_state, teacher_forcing_ratio, return_decode_dict)
         

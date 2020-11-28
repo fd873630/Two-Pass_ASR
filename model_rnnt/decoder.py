@@ -5,7 +5,7 @@ import torch.nn as nn
 class BaseDecoder(nn.Module):
     def __init__(self, embedding_size, hidden_size, vocab_size, output_size, n_layers, dropout=0.2):
         super(BaseDecoder, self).__init__()
-
+        self.vocab_size = vocab_size
         self.embedding = nn.Embedding(vocab_size, embedding_size, padding_idx=0)
         self.lstm = nn.LSTM(
             input_size=embedding_size,

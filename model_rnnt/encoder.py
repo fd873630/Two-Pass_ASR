@@ -31,8 +31,7 @@ class BaseEncoder(nn.Module):
             inputs = inputs[indices]
             inputs = nn.utils.rnn.pack_padded_sequence(inputs, sorted_seq_lengths, batch_first=True)
         
-        if inputs.is_cuda:
-            self.lstm.flatten_parameters()
+        self.lstm.flatten_parameters()
 
         outputs, hidden = self.lstm(inputs)
         
