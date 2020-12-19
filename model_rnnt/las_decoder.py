@@ -23,7 +23,7 @@ class Speller(nn.Module):
         self.hidden_dim = hidden_dim
         self.input_dropout = nn.Dropout(dropout_p)
         self.embedding = nn.Embedding(vocab_size, embedding_size, padding_idx=0)
-        self.attention = nn.MultiheadAttention(embed_dim=hidden_dim,
+        self.attention = nn.MultiheadAttention(embed_dim=projection_dim,
                                                 num_heads=attention_head)
         self.projection = nn.Linear(hidden_dim, projection_dim, bias=True)
         #self.projection1 = nn.Linear(hidden_dim, projection_dim, bias=True)
@@ -44,19 +44,26 @@ class Speller(nn.Module):
         embedded = self.embedding(input_var)
         embedded = self.input_dropout(embedded)
         
-        #if self.training:
-        
+        #if self.training:        
         self.rnn.flatten_parameters()
 
         output, hidden = self.rnn(embedded, hidden)
-        output = output.transpose(0, 1).contiguous()
-        
-        encoder_outputs = encoder_outputs.transpose(0, 1)
+        output = self.projection(output)
 
+        output = output.transpose(0, 1).contiguous()
+
+        encoder_outputs = encoder_outputs.transpose(0, 1)
+    
         context, attn = self.attention(output, encoder_outputs, encoder_outputs)
 
+        attn_score = torch.zeros(attn.size(0),1).to(self.device)
+        
+        for batch_idx in range(attn.size(0)):
+            attn_score[batch_idx] = attn[batch_idx][torch.where(attn[batch_idx] > 0.5)].sum()
+
         context = context.transpose(0, 1).contiguous()
-        output = self.projection(context)
+        #output = self.projection(context)
+        output = context
         
         output = self.generator(output)
         step_output = F.log_softmax(output, dim=-1)
@@ -78,8 +85,7 @@ class Speller(nn.Module):
         
         if inputs.is_cuda: inputs_add_sos = inputs_add_sos.cuda()
         
-        inputs = inputs.long()
-
+        inputs = inputs.long()        
         inputs = torch.cat((inputs_add_sos, inputs), dim=1)
 
         use_teacher_forcing = True if random.random() < teacher_forcing_ratio else False

@@ -8,7 +8,6 @@ def _inflate(tensor, n_repeat, dim):
 
     return tensor.repeat(*repeat_dims)
 
-
 class TopKDecoder(nn.Module):
     def __init__(self, decoder, batch_size):
         super(TopKDecoder, self).__init__()
@@ -35,7 +34,7 @@ class TopKDecoder(nn.Module):
         if input_var.is_cuda: inputs_add_sos = inputs_add_sos.cuda()
         
         step_outputs, hidden, attn, _ = self.forward_step(inputs_add_sos, hidden, encoder_outputs, attn)
-        
+    
         self.cumulative_ps, self.ongoing_beams = step_outputs.topk(k) # cumulative_ps : torch.Size([1, 1, 5])
 
         self.ongoing_beams = self.ongoing_beams.view(batch_size * k, 1) # torch.Size([5, 1])

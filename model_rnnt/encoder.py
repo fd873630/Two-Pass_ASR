@@ -18,8 +18,6 @@ class BaseEncoder(nn.Module):
         self.output_proj = nn.Linear(2 * hidden_size if bidirectional else hidden_size,
                                      output_size, bias=True)
         
-
-
     def forward(self, inputs, input_lengths):
         assert inputs.dim() == 3
         
@@ -47,8 +45,7 @@ class BaseEncoder(nn.Module):
         max_output_size = outputs.size(1)
         padded_output[:, :max_output_size, :] = outputs        
 
-        logits = padded_output
-        #logits = self.output_proj(padded_output)
+        logits = self.output_proj(padded_output)
 
         return logits, hidden
 

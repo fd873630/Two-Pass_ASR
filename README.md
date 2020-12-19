@@ -3,18 +3,17 @@
 
 # Two-Pass End-to-End Speech Recognition
 
-|Strategy|Feature|Dataset|CER|  
-|--------|-----|-------|------| 
-|B0|80-dimensional log-Mel features|KsponSpeech_val(길이 조절 데이터)|17.32|
-|B1|80-dimensional log-Mel features|KsponSpeech_val(길이 조절 데이터)|?|
-|E0|80-dimensional log-Mel features|KsponSpeech_val(길이 조절 데이터)|?|
-|E1|80-dimensional log-Mel features|KsponSpeech_val(길이 조절 데이터)|?|
+|Strategy|Feature|Dataset|CER/WER|(Beam)CER/WER|  
+|--------|-----|-------|------|------| 
+|B0|80-dimensional log-Mel features|KsponSpeech_val(길이 조절 데이터)|19.85/35.10||?|
+|B1|80-dimensional log-Mel features|KsponSpeech_val(길이 조절 데이터)|14.57/29.44||?|
+|E0|80-dimensional log-Mel features|KsponSpeech_val(길이 조절 데이터)|?||?|
+|E1|80-dimensional log-Mel features|KsponSpeech_val(길이 조절 데이터)|?||?|
 
-
-* B0 : RNN-T only(beam mode)
-* B1 : LAS only(beam mode)
-* E0 : 2nd Beam Search(beam mode)
-* E1 : Rescoring(beam mode)
+* B0 : RNN-T only
+* B1 : LAS only
+* E0 : 2nd Beam Search
+* E1 : Rescoring
 
 ## Intro
 한국어를 위한 Two-Pass End-to-End Speech Recognition입니다. 실시간 인식에는 attention기반의 모델보다 RNN-Transducer가 사용된다고 합니다. 하지만 기존의 Listen attend and Spell 보다 성능이 좋지 못합니다. 이 논문에서는 RNN-T와 LAS를 합쳐 성능과 실시간 인식률을 두마리의 토끼를 잡자는 컨셉의 논문입니다. 현재 git hub에는 Pytorch Two pass 코드와 성능결과가 없어 한국어 Two-pass를 구현하고 성능을 확인하였습니다.
@@ -25,15 +24,18 @@
 ## Training(Combined Loss)
 ### First step
 * RNN-T model 을 학습합니다.
--> first_step.py
+
+  -> first_step.py
 
 ### Second step
 * Frist step에서 학습된 encoder를 고정 시키고 LAS decoder를 학습합니다.
--> Second_step.py
+
+  -> Second_step.py
 
 ### Third step
 * "Deep fine tuning" shared encoder와 RNN-T decoder, LAS decoder를 같이 학습시킨다.
--> not yet
+
+  -> not yet
 
 ## Data
 ### Dataset information

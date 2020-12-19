@@ -43,10 +43,16 @@ def load_label(label_path):
 
     return char2index, index2char
 
+# pad token 정의
+char2index, index2char = load_label('./label,csv/AI_hub_label.labels')
+SOS_token = char2index['<s>']
+EOS_token = char2index['</s>']
+PAD_token = char2index['_']
+
 def rnnt_train(model, train_loader, optimizer, criterion, device):
     model.train()
 
-    eos_id = 53
+    eos_id = EOS_token
     total_loss = 0
     start_time = time.time()
     total_batch_num = len(train_loader)
@@ -76,7 +82,7 @@ def rnnt_train(model, train_loader, optimizer, criterion, device):
         loss.backward()
         optimizer.step()
 
-        if i % 1000 == 0:
+        if i % 2000 == 0:
             print('{} train_batch: {:4d}/{:4d}, train_loss: {:.2f}, train_time: {:.2f}'.format(datetime.datetime.now(), i, total_batch_num, loss.item(), time.time() - start_time))
             start_time = time.time()
 
@@ -87,7 +93,7 @@ def rnnt_train(model, train_loader, optimizer, criterion, device):
 def rnnt_eval(model, val_loader, criterion, device):
     model.eval()
 
-    eos_id = 53
+    eos_id = EOS_token
     total_loss = 0
     total_batch_num = len(val_loader)
     with torch.no_grad():
@@ -143,6 +149,7 @@ def main():
                         window_stride=WINDOW_STRIDE,
                         window=WINDOW)
 
+    # seed 설정
     random.seed(config.data.seed)
     torch.manual_seed(config.data.seed)
     torch.cuda.manual_seed_all(config.data.seed)
@@ -159,10 +166,6 @@ def main():
                       dropout=config.model.dropout, 
                       bidirectional=config.model.enc.bidirectional)
     
-    for param in enc.parameters():
-        param.data.uniform_(-0.08, 0.08)
-    #enc.load_state_dict(torch.load("/home/jhjeong/jiho_deep/two_pass/model_save/first_train_enc_save.pth"))
-
     #Transcription Network
     rnnt_dec = BaseDecoder(embedding_size=config.model.rnn_t_dec.embedding_size,
                            hidden_size=config.model.rnn_t_dec.hidden_size, 
@@ -170,29 +173,19 @@ def main():
                            output_size=config.model.rnn_t_dec.output_size, 
                            n_layers=config.model.rnn_t_dec.n_layers, 
                            dropout=config.model.dropout)
-   
-    for param in rnnt_dec.parameters():
-        param.data.uniform_(-0.08, 0.08)
 
     #Joint Network
     joint = JointNet(input_size=config.model.enc.output_size, 
                      inner_dim=config.model.joint.inner_dim, 
                      vocab_size=config.model.vocab_size)
     
-    for param in joint.parameters():
-        param.data.uniform_(-0.08, 0.08)
-
     #Transducer
     rnnt_model = Transducer(encoder=enc, 
                             decoder=rnnt_dec, 
                             joint=joint,
-                            enc_hidden=config.model.enc.hidden_size,
-                            enc_projection=config.model.enc.output_size) 
+                            enc_hidden=config.model.enc.hidden_size) 
     
-    for param in rnnt_model.parameters():
-        param.data.uniform_(-0.08, 0.08)
-
-    #rnnt_model.load_state_dict(torch.load("/home/jhjeong/jiho_deep/two_pass/model_save/first_train_model_save.pth"))
+    #rnnt_model.load_state_dict(torch.load("./plz_load/rnnt_model_end.pth"))
 
     #-------------------------- Loss Initialize --------------------------
     rnnt_criterion = RNNTLoss().to(device)
@@ -206,10 +199,9 @@ def main():
 
     #-------------------- Model Pararllel & Optimizer --------------------
     rnnt_model = nn.DataParallel(rnnt_model).to(device)
-
-    rnnt_optimizer = optim.AdamW(rnnt_model.module.parameters(), 
-                                 lr=config.optim.lr, 
-                                 weight_decay=config.optim.weight_decay)
+    
+    rnnt_optimizer = optim.Adam(rnnt_model.module.parameters(), 
+                                lr=config.optim.lr)
 
     rnnt_scheduler = optim.lr_scheduler.MultiStepLR(rnnt_optimizer, 
                                                     milestones=config.optim.milestones, 
@@ -248,6 +240,9 @@ def main():
 
     pre_val_loss = 100000
     for epoch in range(config.training.begin_epoch, config.training.end_epoch):
+        for param_group in rnnt_optimizer.param_groups:
+            print("lr = ", param_group['lr'])
+        
         print('{} 학습 시작'.format(datetime.datetime.now()))
         train_time = time.time()
         train_loss = rnnt_train(rnnt_model, train_loader, rnnt_optimizer, rnnt_criterion, device)
@@ -262,20 +257,27 @@ def main():
 
         rnnt_scheduler.step()
         
+        if pre_val_loss > val_loss:
+            print("best model을 저장하였습니다.")
+            torch.save(rnnt_model.module.state_dict(), "./plz_load/rnnt_model.pth")
+            torch.save(enc.state_dict(), "./plz_load/enc.pth")
+            pre_val_loss = val_loss
+
+        torch.save(rnnt_model.module.state_dict(), "./plz_load/rnnt_model_end.pth")
+        torch.save(enc.state_dict(), "./plz_load/enc_end.pth")
+
         with open("./first_step_train.txt", "a") as ff:
+            for param_group in rnnt_optimizer.param_groups:
+               lr = param_group['lr']
+            
+            ff.write("lr = " + str(lr))
+            ff.write('\n')
             ff.write('Epoch %d (Training) Loss %0.4f time %0.4f' % (epoch+1, train_loss, train_total_time))
             ff.write('\n')
             ff.write('Epoch %d (val) Loss %0.4f time %0.4f ' % (epoch+1, val_loss, eval_total_time))
             ff.write('\n')
             ff.write('\n')
         
-        if pre_val_loss > val_loss:
-            print("best model을 저장하였습니다.")
-            torch.save(rnnt_model.module.state_dict(), "./model_save/first_train_model_save_no_blank.pth")
-            torch.save(enc.state_dict(), "./model_save/first_train_enc_save_no_blank.pth")
-            pre_val_loss = val_loss
-
-        torch.save(rnnt_model.module.state_dict(), "./model_save/first_train_model_save_no_blank_end.pth")
-        torch.save(enc.state_dict(), "./model_save/first_train_enc_save_no_blank_end.pth")
+        
 if __name__ == '__main__':
     main()

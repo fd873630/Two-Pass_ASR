@@ -3,7 +3,7 @@ data:
   val_path: "/home/jhjeong/jiho_deep/two_pass/label,csv/AI_hub_val_U_800_T_50.csv"
   seed: 123456
   num_workers: 16
-  batch_size: 32
+  batch_size: 12
   
 
 audio_data:
@@ -19,7 +19,7 @@ model:
     input_size: 80
     hidden_size: 1024
     output_size: 320
-    n_layers: 8
+    n_layers: 6
     bidirectional: False
 
   rnn_t_dec:
@@ -41,11 +41,11 @@ model:
   joint:
     inner_dim: 320
   
-  vocab_size: 54
+  vocab_size: 1907
   dropout: 0.3
 
 training:
-  begin_epoch: 0
+  begin_epoch: 63
   end_epoch: 100
 
 inference:
@@ -53,7 +53,7 @@ inference:
 
 optim:
   type: "AdamW"
-  lr: 0.0001
+  lr: 0.00003333
   weight_decay: 0.01
   milestones: [7, 14]
   las_milestones: [20, 25]

@@ -14,14 +14,36 @@ from .spec_augment import spec_augment
 from torch.utils.data import Dataset, Sampler, DistributedSampler, DataLoader
 import matplotlib
 
-PAD = 0
-
 windows = {
     'hamming': scipy.signal.hamming,
     'hann': scipy.signal.hann,
     'blackman': scipy.signal.blackman,
     'bartlett': scipy.signal.bartlett
     }
+
+def load_label(label_path):
+    char2index = dict() # [ch] = id
+    index2char = dict() # [id] = ch
+    with open(label_path, 'r') as f:
+        for no, line in enumerate(f):
+            if line[0] == '#': 
+                continue
+            
+            index, char = line.split('   ')
+            char = char.strip()
+            if len(char) == 0:
+                char = ' '
+
+            char2index[char] = int(index)
+            index2char[int(index)] = char
+
+    return char2index, index2char
+
+char2index, index2char = load_label('./label,csv/AI_hub_label.labels')
+SOS_token = char2index['<s>']
+EOS_token = char2index['</s>']
+PAD_token = char2index['_']
+
 
 class AttrDict(dict):
     """
@@ -120,8 +142,8 @@ class SpectrogramDataset(Dataset, SpectrogramParser):
             transcript = f.read()
             transcript = transcript.strip().split(' ')
             transcript = list(map(int, transcript))
-            transcript.append(53)           
-            
+            transcript.append(EOS_token)           
+
         return transcript
 
     def __len__(self):
@@ -157,7 +179,7 @@ def _collate_fn(batch):
     seqs = torch.zeros(batch_size, max_seq_size, feat_size)
 
     targets = torch.zeros(batch_size, max_target_size).to(torch.long)
-    targets.fill_(PAD)
+    targets.fill_(PAD_token)
 
     for x in range(batch_size):
         sample = batch[x]

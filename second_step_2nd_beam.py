@@ -196,7 +196,7 @@ def main():
                       device=device,
                       beam_mode=True)
 
-    las_dec.load_state_dict(torch.load("/home/jhjeong/jiho_deep/two_pass/model_save/second_last_las_dec_save_no_blank_end3.pth"))
+    las_dec.load_state_dict(torch.load("./model_save/second_last_las_dec_save_no_blank_end.pth"))
 
     las_dec.to(device)
 

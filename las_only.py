@@ -26,7 +26,7 @@ from model_rnnt.las import ListenAttendSpell
 from model_rnnt.hangul import moasseugi
 from model_rnnt.data_loader_deepspeech import SpectrogramDataset, AudioDataLoader, AttrDict
 
-class LabelSmoothingLoss(nn.Module):
+class LabelSmoothingLoss1(nn.Module):
     def __init__(self, vocab_size, ignore_index, smoothing=0.1, dim=-1):
         super(LabelSmoothingLoss, self).__init__()
         self.confidence = 1.0 - smoothing
@@ -40,49 +40,44 @@ class LabelSmoothingLoss(nn.Module):
             label_smoothed = torch.zeros_like(logit)
             label_smoothed.fill_(self.smoothing / (self.vocab_size - 1))
             label_smoothed.scatter_(1, target.data.unsqueeze(1), self.confidence)
+            
             label_smoothed[target == self.ignore_index, :] = 0
             
         return torch.sum(-label_smoothed * logit)
 
-def compute_cer(preds, labels):
-    char2index, index2char = load_label('./label,csv/hangul.labels')
+class LabelSmoothingLoss(nn.Module):
+    """
+    https://github.com/sooftware/KoSpeech/blob/master/kospeech/criterion/label_smoothed_cross_entropy.py
+    modified by jiho jeong
+    """
+    def __init__(self, num_classes, ignore_index, smoothing = 0.1, dim = -1, reduction='sum'):
+        super(LabelSmoothingLoss, self).__init__()
+        self.confidence = 1.0 - smoothing
+        self.smoothing = smoothing
+        self.num_classes = num_classes
+        self.dim = dim
+        self.ignore_index = ignore_index
+        self.reduction = reduction.lower()
 
-    count = 0    
-    total_wer = 0
-    total_cer = 0
+        if self.reduction == 'sum':
+            self.reduction_method = torch.sum
+        elif self.reduction == 'mean':
+            self.reduction_method = torch.mean
+        else:
+            raise ValueError("Unsupported reduction method {0}".format(reduction))
 
-    total_wer_len = 0
-    total_cer_len = 0
+    def forward(self, logit, target):
+        if self.smoothing > 0.0:
+            with torch.no_grad():
+                label_smoothed = torch.zeros_like(logit)
+                label_smoothed.fill_(self.smoothing / (self.num_classes - 1))
+                label_smoothed.scatter_(1, target.data.unsqueeze(1), self.confidence)
+                label_smoothed[target == self.ignore_index, :] = 0
+               
+            return self.reduction_method(-label_smoothed * logit)
 
-    for label, pred in zip(labels, preds):
-        units = []
-        units_pred = []
-        for a in label:
-            if a == 53: # eos
-                break
-            units.append(index2char[a])
-            
-        for b in pred:
-            if b == 53: # eos
-                break
-            units_pred.append(index2char[b])
-            
-        label = moasseugi(units)
-        pred = moasseugi(units_pred)
 
-        wer = eval_wer(pred, label)
-        cer = eval_cer(pred, label)
-        
-        wer_len = len(label.split())
-        cer_len = len(label.replace(" ", ""))
-
-        total_wer += wer
-        total_cer += cer
-
-        total_wer_len += wer_len
-        total_cer_len += cer_len
-        
-    return total_wer, total_cer, total_wer_len, total_cer_len
+        return F.cross_entropy(logit, target, ignore_index=self.ignore_index, reduction=self.reduction)
 
 def load_label(label_path):
     char2index = dict() # [ch] = id
@@ -102,10 +97,56 @@ def load_label(label_path):
 
     return char2index, index2char
 
+# SOS_token, EOS_token, PAD_token 정의
+char2index, index2char = load_label('./label,csv/AI_hub_label.labels')
+SOS_token = char2index['<s>']
+EOS_token = char2index['</s>']
+PAD_token = char2index['_']
+
+def compute_cer(preds, labels):
+    #char2index, index2char = load_label('./label,csv/hangul.labels')
+
+    count = 0    
+    total_wer = 0
+    total_cer = 0
+
+    total_wer_len = 0
+    total_cer_len = 0
+
+    for label, pred in zip(labels, preds):
+        units = []
+        units_pred = []
+        for a in label:
+            if a == EOS_token: # eos
+                break
+            units.append(index2char[a])
+            
+        for b in pred:
+            if b == EOS_token: # eos
+                break
+            units_pred.append(index2char[b])
+
+        label = ''.join(units)
+        pred = ''.join(units_pred)
+
+        wer = eval_wer(pred, label)
+        cer = eval_cer(pred, label)
+        
+        wer_len = len(label.split())
+        cer_len = len(label.replace(" ", ""))
+
+        total_wer += wer
+        total_cer += cer
+
+        total_wer_len += wer_len
+        total_cer_len += cer_len
+        
+    return total_wer, total_cer, total_wer_len, total_cer_len
+
 def las_train(model, train_loader, optimizer, criterion, device, tf):
     model.train()
 
-    eos_id = 53
+    eos_id = EOS_token
     total_loss = 0
     total_num = 0
 
@@ -121,7 +162,6 @@ def las_train(model, train_loader, optimizer, criterion, device, tf):
         optimizer.zero_grad()
 
         inputs, targets, inputs_lengths, targets_lengths = data
-
         total_num += sum(targets_lengths)
 
         inputs_lengths = torch.IntTensor(inputs_lengths)
@@ -134,16 +174,17 @@ def las_train(model, train_loader, optimizer, criterion, device, tf):
 
         logits, _, _ = model(inputs, inputs_lengths, targets, tf, False)
         logits = torch.stack(logits, dim=1).to(device)
-
+        
         hypothesis = logits.max(-1)[1]
-        #hypothesis = hypothesis.squeeze()
-                
-        _, cer, _, cer_len = compute_cer(hypothesis.cpu().numpy(),targets.cpu().numpy()) 
+        
+        wer, cer, wer_len, cer_len = compute_cer(hypothesis.cpu().numpy(),targets.cpu().numpy()) 
 
         total_cer += cer
         total_cer_len += cer_len
 
-        #loss = criterion(logits, targets, 0.05)
+        total_wer += wer
+        total_wer_len += wer_len
+
         loss = criterion(logits.contiguous().view(-1, logits.size(-1)), targets.contiguous().view(-1))
 
         total_loss += loss.item()
@@ -152,20 +193,21 @@ def las_train(model, train_loader, optimizer, criterion, device, tf):
         optimizer.step()
 
         if i % 1000 == 0:
-            print('{} train_batch: {:4d}/{:4d}, train_loss: {:.4f}, train_cer: {:.2f} train_time: {:.2f}'
-                  .format(datetime.datetime.now(), i, total_batch_num, loss.item(), (cer/cer_len)*100, time.time() - start_time))
+            print('{} train_batch: {:4d}/{:4d}, train_loss: {:.4f}, train_cer: {:.2f}, train_wer: {:.2f} train_time: {:.2f}'
+                  .format(datetime.datetime.now(), i, total_batch_num, loss.item(), (cer/cer_len)*100, (wer/wer_len)*100, time.time() - start_time))
             start_time = time.time()
 
     final_cer = (total_cer / total_cer_len) * 100
+    final_wer = (total_wer / total_wer_len) * 100
 
     train_loss = total_loss / total_batch_num
 
-    return train_loss, final_cer
+    return train_loss, final_cer, final_wer
 
 def las_eval(model, val_loader, criterion, device):
     model.eval()
 
-    eos_id = 53
+    eos_id = EOS_token
     total_loss = 0
     total_num = 0
 
@@ -196,20 +238,24 @@ def las_eval(model, val_loader, criterion, device):
             hypothesis = logits.max(-1)[1]
 
             hypothesis = hypothesis.squeeze()
-            _, cer, _, cer_len = compute_cer(hypothesis.cpu().numpy(),targets.cpu().numpy())        
+            wer, cer, wer_len, cer_len = compute_cer(hypothesis.cpu().numpy(),targets.cpu().numpy())        
 
             total_cer += cer
             total_cer_len += cer_len
+
+            total_wer += wer
+            total_wer_len += wer_len
             
             loss = criterion(logits.contiguous().view(-1, logits.size(-1)), targets.contiguous().view(-1))
 
             total_loss += loss.item()
     
-        val_loss = total_loss / total_batch_num
+    val_loss = total_loss / total_batch_num
 
     final_cer = (total_cer / total_cer_len) * 100
+    final_wer = (total_wer / total_wer_len) * 100
 
-    return val_loss, final_cer
+    return val_loss, final_cer, final_wer
 
 def main():
     
@@ -256,17 +302,14 @@ def main():
                       n_layers=config.model.enc.n_layers, 
                       dropout=config.model.dropout, 
                       bidirectional=config.model.enc.bidirectional)
-    
-    for param1 in enc.parameters():
-        param1.data.uniform_(-0.08, 0.08) 
 
     las_dec = Speller(vocab_size=config.model.vocab_size,
                       embedding_size=config.model.las_dec.embedding_size,
                       max_length=config.model.las_dec.max_length, 
                       hidden_dim=config.model.las_dec.hidden_size, 
-                      pad_id=0, 
-                      sos_id=52, 
-                      eos_id=53, 
+                      pad_id=PAD_token, 
+                      sos_id=SOS_token, 
+                      eos_id=EOS_token, 
                       attention_head=config.model.las_dec.attention_head, 
                       num_layers=config.model.las_dec.n_layers,
                       projection_dim=config.model.las_dec.projection_dim, 
@@ -274,27 +317,24 @@ def main():
                       device=device,
                       beam_mode=False)
     
-    for param in las_dec.parameters():
-        param.data.uniform_(-0.08, 0.08) 
-       
     las_model = ListenAttendSpell(enc, las_dec, "False").to(device)
+    las_model.load_state_dict(torch.load("./plz_load/only_las_model_end.pth"))
     las_model = nn.DataParallel(las_model).to(device)
 
     #-------------------------- Loss Initialize --------------------------
 
     las_criterion = nn.CrossEntropyLoss(ignore_index=0).to(device)
-    #las_criterion = LabelSmoothingLoss(vocab_size=config.model.vocab_size, ignore_index=0, smoothing=0.1)
+    #las_criterion = LabelSmoothingLoss(num_classes=config.model.vocab_size, ignore_index=0, smoothing=0.1, reduction='sum').to(device)
     
     #-------------------- Model Pararllel & Optimizer --------------------
-    
+    '''
     las_optimizer = optim.AdamW(las_model.module.parameters(), 
                                  lr=config.optim.lr, 
                                  weight_decay=config.optim.weight_decay)
     '''
     las_optimizer = optim.Adam(las_model.module.parameters(), 
-                                lr=config.optim.lr, 
-                                weight_decay=config.optim.weight_decay)
-    '''
+                                lr=config.optim.lr)
+    
     las_scheduler = optim.lr_scheduler.MultiStepLR(las_optimizer, 
                                                     milestones=config.optim.las_milestones, 
                                                     gamma=config.optim.decay_rate)
@@ -310,7 +350,7 @@ def main():
     train_loader = AudioDataLoader(dataset=train_dataset,
                                     shuffle=True,
                                     num_workers=config.data.num_workers,
-                                    batch_size=28,
+                                    batch_size=60,
                                     drop_last=True)
     
     #val dataset
@@ -323,7 +363,7 @@ def main():
     val_loader = AudioDataLoader(dataset=val_dataset,
                                  shuffle=True,
                                  num_workers=config.data.num_workers,
-                                 batch_size=28,
+                                 batch_size=60,
                                  drop_last=True)
 
     print(" ")
@@ -336,50 +376,55 @@ def main():
         for param_group in las_optimizer.param_groups:
             print("lr = ", param_group['lr'])
 
-        if epoch < 3:
-            tf = 1
-
-        elif epoch < 10:
-            tf = epoch * (-1/20) + 23/20
-        
+        if epoch < 20:
+            tf = 0.95
+        elif epoch < 25:
+            tf = 0.9
+        elif epoch < 30:
+            tf = 0.85
+        elif epoch < 35:
+            tf = 0.8
+        elif epoch < 40:
+            tf = 0.75
+        elif epoch < 45:
+            tf = 0.7
+        elif epoch < 50:
+            tf = 0.65
         else:
             tf = 0.6
-        
+
         print("tf = ", tf)
         print('{} 학습 시작'.format(datetime.datetime.now()))
         train_time = time.time()
-        train_loss, train_cer = las_train(las_model, train_loader, las_optimizer, las_criterion, device, tf)
+        train_loss, train_cer, train_wer = las_train(las_model, train_loader, las_optimizer, las_criterion, device, tf)
         train_total_time = time.time() - train_time
-        print('{} Epoch {} (Training) Loss {:.4f}, CER {:.2f}, time: {:.2f}'.format(datetime.datetime.now(), epoch+1, train_loss, train_cer, train_total_time))
+        print('{} Epoch {} (Training) Loss {:.4f}, CER {:.2f}, WER {:.2f}, time: {:.2f}'.format(datetime.datetime.now(), epoch+1, train_loss, train_cer, train_wer, train_total_time))
         
         print('{} 평가 시작'.format(datetime.datetime.now()))
         eval_time = time.time()
-        val_loss, test_cer = las_eval(las_model, val_loader, las_criterion, device)
+        val_loss, test_cer, test_wer = las_eval(las_model, val_loader, las_criterion, device)
         eval_total_time = time.time() - eval_time
-        print('{} Epoch {} (val) Loss {:.4f}, CER {:.2f}, time: {:.2f}'.format(datetime.datetime.now(), epoch+1, val_loss, test_cer, eval_total_time))
+        print('{} Epoch {} (val) Loss {:.4f}, CER {:.2f}, WER {:.2f}, time: {:.2f}'.format(datetime.datetime.now(), epoch+1, val_loss, test_cer, test_wer, eval_total_time))
         
         #las_scheduler.step()
         
         with open("./las_only_train.txt", "a") as ff:
             ff.write('tf = %0.4f' % (tf))
             ff.write('\n')
-            ff.write('Epoch %d (Training) Loss %0.4f CER %0.4f time %0.4f' % (epoch+1, train_loss, train_cer, train_total_time))
+            ff.write('Epoch %d (Training) Loss %0.4f CER %0.4f WER %0.4f time %0.4f' % (epoch+1, train_loss, train_cer, train_wer, train_total_time))
             ff.write('\n')
-            ff.write('Epoch %d (val) Loss %0.4f CER %0.4f time %0.4f ' % (epoch+1, val_loss, test_cer, eval_total_time))
+            ff.write('Epoch %d (val) Loss %0.4f CER %0.4f WER %0.4f time %0.4f ' % (epoch+1, val_loss, test_cer, test_wer, eval_total_time))
             ff.write('\n')
             ff.write('\n')
-        
+
         if pre_test_loss > val_loss:
             print("best model을 저장하였습니다.")
-            torch.save(las_model.module.state_dict(), "./model_save/las_model_save.pth")
-            torch.save(las_dec.state_dict(), "./model_save/las_model_las_dec.pth")
-            torch.save(enc.state_dict(), "./model_save/las_model_enc.pth")
+            torch.save(las_model.module.state_dict(), "./plz_load/only_las_model1.pth")
             pre_test_loss = val_loss
 
-        torch.save(las_model.module.state_dict(), "./model_save/las_model_save_end.pth")
-        torch.save(las_dec.state_dict(), "./model_save/las_model_las_dec.pth")
-        torch.save(enc.state_dict(), "./model_save/las_model_enc.pth")
+        torch.save(las_model.module.state_dict(), "./plz_load/only_las_model_end1.pth")
         #torch.save(las_dec.state_dict(), "./model_save/second_last_las_dec_save_no_blank_end3.pth")
+        
 
 if __name__ == '__main__':
     main()

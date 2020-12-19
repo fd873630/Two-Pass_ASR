@@ -153,12 +153,12 @@ def las_train(model, train_loader, optimizer, criterion, device, tf):
 
         if i % 1000 == 0:
             print('{} train_batch: {:4d}/{:4d}, train_loss: {:.4f}, train_cer: {:.2f} train_time: {:.2f}'
-                  .format(datetime.datetime.now(), i, total_batch_num, total_loss/total_num, (cer/cer_len)*100, time.time() - start_time))
+                  .format(datetime.datetime.now(), i, total_batch_num, loss.item(), (cer/cer_len)*100, time.time() - start_time))
             start_time = time.time()
 
     final_cer = (total_cer / total_cer_len) * 100
 
-    train_loss = total_loss / total_num
+    train_loss = total_loss / total_batch_num
 
     return train_loss, final_cer
 
@@ -190,7 +190,7 @@ def las_eval(model, val_loader, criterion, device):
             targets_lengths = targets_lengths.to(device)
 
             
-            logits, _, _ = model(inputs, inputs_lengths, targets, 1, False)
+            logits, _, _ = model(inputs, inputs_lengths, targets, 0, False)
             logits = torch.stack(logits, dim=1).to(device)
 
             hypothesis = logits.max(-1)[1]
@@ -205,7 +205,7 @@ def las_eval(model, val_loader, criterion, device):
 
             total_loss += loss.item()
     
-        val_loss = total_loss / total_num
+        val_loss = total_loss / total_batch_num
 
     final_cer = (total_cer / total_cer_len) * 100
 
@@ -258,7 +258,7 @@ def main():
                       bidirectional=config.model.enc.bidirectional)
     
     #학습된 enc 불러오기
-    enc.load_state_dict(torch.load("/home/jhjeong/jiho_deep/two_pass/model_save/first_train_enc_save_no_blank.pth"))
+    enc.load_state_dict(torch.load("/home/jhjeong/jiho_deep/two_pass/plz_load/enc.pth"))
     
     #enc 고정 시키기
     for param in enc.parameters():
@@ -281,26 +281,24 @@ def main():
     for param in las_dec.parameters():
         param.data.uniform_(-0.08, 0.08) 
     
-    las_dec.load_state_dict(torch.load("/home/jhjeong/jiho_deep/two_pass/model_save/second_last_las_dec_save_no_blank_end2.pth"))
-
+    las_dec.load_state_dict(torch.load("./plz_load/second_las_dec_end.pth"))
     las_model = ListenAttendSpell(enc, las_dec, "False").to(device)
     las_model = nn.DataParallel(las_model).to(device)
 
     #-------------------------- Loss Initialize --------------------------
 
-    #las_criterion = nn.CrossEntropyLoss(ignore_index=0).to(device)
-    las_criterion = LabelSmoothingLoss(vocab_size=config.model.vocab_size, ignore_index=0, smoothing=0.1)
+    las_criterion = nn.CrossEntropyLoss(ignore_index=0).to(device)
+    #las_criterion = LabelSmoothingLoss(vocab_size=config.model.vocab_size, ignore_index=0, smoothing=0.1)
     
     #-------------------- Model Pararllel & Optimizer --------------------
-    
+    '''
     las_optimizer = optim.AdamW(las_model.module.parameters(), 
-                                 lr=config.optim.lr * 0.333, 
+                                 lr=config.optim.lr, 
                                  weight_decay=config.optim.weight_decay)
     '''
     las_optimizer = optim.Adam(las_model.module.parameters(), 
-                                lr=config.optim.lr, 
-                                weight_decay=config.optim.weight_decay)
-    '''
+                                lr=config.optim.lr)
+    
     las_scheduler = optim.lr_scheduler.MultiStepLR(las_optimizer, 
                                                     milestones=config.optim.las_milestones, 
                                                     gamma=config.optim.decay_rate)
@@ -316,7 +314,7 @@ def main():
     train_loader = AudioDataLoader(dataset=train_dataset,
                                     shuffle=True,
                                     num_workers=config.data.num_workers,
-                                    batch_size=32,
+                                    batch_size=config.data.batch_size,
                                     drop_last=True)
     
     #val dataset
@@ -329,7 +327,7 @@ def main():
     val_loader = AudioDataLoader(dataset=val_dataset,
                                  shuffle=True,
                                  num_workers=config.data.num_workers,
-                                 batch_size=32,
+                                 batch_size=config.data.batch_size,
                                  drop_last=True)
 
     print(" ")
@@ -340,7 +338,18 @@ def main():
     for epoch in range(config.training.begin_epoch, config.training.end_epoch):
         for param_group in las_optimizer.param_groups:
             print("lr = ", param_group['lr'])
-        tf = 1
+
+        if epoch < 30:
+               tf = 0.8
+        elif epoch < 35:
+            tf = 0.75
+        elif epoch < 40:
+            tf = 0.7
+        elif epoch < 45:
+            tf = 0.65
+        else:
+            tf = 0.6
+        
         print("tf = ", tf)
         print('{} 학습 시작'.format(datetime.datetime.now()))
         train_time = time.time()
@@ -368,10 +377,28 @@ def main():
         if pre_test_cer > test_cer:
             print("best model을 저장하였습니다.")
             #torch.save(las_model.module.state_dict(), "./model_save/second_las_train_model_save.pth")
-            torch.save(las_dec.state_dict(), "./model_save/second_las_dec_save_no_blank3.pth")
+            torch.save(las_dec.state_dict(), "./plz_load/second_las_dec_best.pth")
             pre_test_cer = test_cer
 
-        torch.save(las_dec.state_dict(), "./model_save/second_last_las_dec_save_no_blank_end3.pth")
+        if epoch+1 == 30:
+            torch.save(las_dec.state_dict(), "./plz_load/second_las_dec_epoch_30.pth")
+        
+        elif epoch+1 == 40:
+            torch.save(las_dec.state_dict(), "./plz_load/second_las_dec_epoch_40.pth")
+        
+        elif epoch+1 == 50:
+            torch.save(las_dec.state_dict(), "./plz_load/second_las_dec_epoch_50.pth")
+        
+        elif epoch+1 == 60:
+            torch.save(las_dec.state_dict(), "./plz_load/second_las_dec_epoch_60.pth")
+        
+        elif epoch+1 == 70:
+            torch.save(las_dec.state_dict(), "./plz_load/second_las_dec_epoch_70.pth")
+        
+        else:
+            pass
+
+        torch.save(las_dec.state_dict(), "./plz_load/second_las_dec_end.pth")
 
 if __name__ == '__main__':
     main()

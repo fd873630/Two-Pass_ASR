@@ -26,7 +26,7 @@ from model_rnnt.hangul import moasseugi
 from model_rnnt.data_loader_deepspeech import SpectrogramDataset, AudioDataLoader, AttrDict
 
 def compute_cer(preds, labels):
-    char2index, index2char = load_label('./label,csv/hangul.labels')
+    char2index, index2char = load_label('./label,csv/AI_hub_label.labels')
     
     total_wer = 0
     total_cer = 0
@@ -43,15 +43,21 @@ def compute_cer(preds, labels):
         for b in pred:
             units_pred.append(index2char[b])
 
-        label = moasseugi(units)
-        pred = moasseugi(units_pred)
+
+        label = ''.join(units)
+        pred = ''.join(units_pred)
 
         cer = eval_cer(pred, label)
+        wer = eval_wer(pred, label)
+
         cer_len = len(label.replace(" ", ""))
+        wer_len = len(label.split())
 
         total_cer += cer
         total_cer_len += cer_len
 
+        total_wer += wer
+        total_wer_len += wer_len
 
     return total_wer, total_cer, total_wer_len, total_cer_len
 
@@ -89,7 +95,7 @@ def inference(model, val_loader, device, beam_search):
         f.write("inference 시작")
         f.write('\n')
 
-    char2index, index2char = load_label('./label,csv/hangul.labels')
+    char2index, index2char = load_label('./label,csv/AI_hub_label.labels')
 
     with torch.no_grad():
         for i, data in enumerate(val_loader):
@@ -120,10 +126,13 @@ def inference(model, val_loader, device, beam_search):
             else:
                 preds = model.recognize(inputs, inputs_lengths)
 
-            _, cer, _, cer_len = compute_cer(preds, transcripts)
+            wer, cer, wer_len, cer_len = compute_cer(preds, transcripts)
      
             total_cer += cer
             total_cer_len += cer_len
+
+            total_wer += wer
+            total_wer_len += wer_len
 
             for a, b in zip(transcripts,preds):
                 chars = []
@@ -135,16 +144,20 @@ def inference(model, val_loader, device, beam_search):
                 for y in b:
                     predic_chars.append(index2char[y])
                 
+                label = ''.join(chars)
+                pred = ''.join(predic_chars)
+
                 with open("./first_inference.txt", "a") as f:
                     f.write('\n')
-                    f.write(moasseugi(chars))
+                    f.write(label)
                     f.write('\n')
-                    f.write(moasseugi(predic_chars))
+                    f.write(pred)
                     f.write('\n')
 
     final_cer = (total_cer / total_cer_len) * 100  
-
-    return final_cer
+    final_wer = (total_wer / total_wer_len) * 100  
+    
+    return final_wer, final_cer
 
 def main():
     beam_mode = True
@@ -186,8 +199,6 @@ def main():
                       dropout=config.model.dropout, 
                       bidirectional=config.model.enc.bidirectional)
 
-    #enc.load_state_dict(torch.load("./model_test_save/enc.pth"))
-
     #Transcription Network
     rnnt_dec = BaseDecoder(embedding_size=config.model.rnn_t_dec.embedding_size,
                            hidden_size=config.model.rnn_t_dec.hidden_size, 
@@ -196,25 +207,19 @@ def main():
                            n_layers=config.model.rnn_t_dec.n_layers, 
                            dropout=config.model.dropout)
 
-    #rnnt_dec.load_state_dict(torch.load("./model_test_save/rnnt_dec.pth"))
-
     #Joint Network
     joint = JointNet(input_size=config.model.enc.output_size, 
                      inner_dim=config.model.joint.inner_dim, 
                      vocab_size=config.model.vocab_size)
 
-    #joint.load_state_dict(torch.load("./model_test_save/joint.pth"))
-
     #Transducer
     rnnt_model = Transducer(encoder=enc, 
                             decoder=rnnt_dec, 
                             joint=joint,
-                            enc_hidden=config.model.enc.hidden_size,
-                            enc_projection=config.model.enc.output_size) 
+                            enc_hidden=config.model.enc.hidden_size) 
 
-    rnnt_model.load_state_dict(torch.load("/home/jhjeong/jiho_deep/two_pass/model_save/first_train_model_save_no_blank.pth"))
+    rnnt_model.load_state_dict(torch.load("./plz_load/rnnt_model.pth"))
 
-    #rnnt_model.load_state_dict(torch.load("/home/jhjeong/jiho_deep/two_pass/model_save/first_train_model_save.pth"))
     rnnt_model = rnnt_model.to(device)
     #rnnt_model = nn.DataParallel(rnnt_model).to(device)
     
@@ -234,7 +239,10 @@ def main():
     print('{} first step inference 시작'.format(datetime.datetime.now()))
     print(" ")
     
-    final_cer = inference(rnnt_model, val_loader, device, beam_mode)
+    final_wer, final_cer = inference(rnnt_model, val_loader, device, beam_mode)
+
+    print("final_wer -> ")
+    print(final_wer)
 
     print("final_cer -> ")
     print(final_cer)

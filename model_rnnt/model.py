@@ -38,15 +38,13 @@ class JointNet(nn.Module):
 
 
 class Transducer(nn.Module):
-    def __init__(self, encoder, decoder, joint, enc_hidden, enc_projection):
+    def __init__(self, encoder, decoder, joint, enc_hidden):
         super(Transducer, self).__init__()
         # define model
         self.encoder = encoder
         self.decoder = decoder
         self.joint = joint
-
-        self.project_layer = nn.Linear(enc_hidden, enc_projection, bias=True)
-
+        
     def forward(self, inputs, inputs_lengths, targets, targets_lengths):
         
         zero = torch.zeros((targets.shape[0], 1)).long()
@@ -56,8 +54,6 @@ class Transducer(nn.Module):
 
         enc_state, _ = self.encoder(inputs, inputs_lengths)
         
-        enc_state = self.project_layer(enc_state)
-
         dec_state, _ = self.decoder(targets_add_blank, targets_lengths+1)
         
         logits = self.joint(enc_state, dec_state)
@@ -70,7 +66,7 @@ class Transducer(nn.Module):
         batch_size = inputs.size(0)
 
         enc_states, _ = self.encoder(inputs, inputs_length)
-        enc_states = self.project_layer(enc_states)
+        #enc_states = self.project_layer(enc_states)
         zero_token = torch.LongTensor([[0]])
 
         if inputs.is_cuda:
@@ -133,7 +129,7 @@ class Transducer(nn.Module):
         #inputs - torch.Size([1, 185, 80])
         #inputs_length - torch.Size([1])
         enc_states, _ = self.encoder(inputs, inputs_length)
-        enc_states = self.project_layer(enc_states)
+        #enc_states = self.project_layer(enc_states)
         enc_states_for_beam = enc_states.squeeze()
         
         prefix = True

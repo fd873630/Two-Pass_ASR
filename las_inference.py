@@ -14,6 +14,7 @@ import torch
 import torch.nn as nn
 import torch.utils.data
 import torch.optim as optim
+import torch.nn.functional as F
 from warprnnt_pytorch import RNNTLoss
 
 from model_rnnt.eval_distance import eval_wer, eval_cer
@@ -22,13 +23,32 @@ from model_rnnt.encoder import BaseEncoder
 from model_rnnt.decoder import BaseDecoder
 from model_rnnt.las_decoder import Speller
 from model_rnnt.las import ListenAttendSpell
-from model_rnnt.rnn_t_topk_decoder import TopK_RNN_T_Decoder
+from model_rnnt.topk_decoder import TopKDecoder
 from model_rnnt.hangul import moasseugi
 from model_rnnt.data_loader_deepspeech import SpectrogramDataset, AudioDataLoader, AttrDict
 
+class LabelSmoothingLoss(nn.Module):
+    def __init__(self, vocab_size, ignore_index, smoothing=0.1, dim=-1):
+        super(LabelSmoothingLoss, self).__init__()
+        self.confidence = 1.0 - smoothing
+        self.smoothing = smoothing
+        self.vocab_size = vocab_size
+        self.dim = dim
+        self.ignore_index = ignore_index
+
+    def forward(self, logit, target):
+        with torch.no_grad():
+            label_smoothed = torch.zeros_like(logit)
+            label_smoothed.fill_(self.smoothing / (self.vocab_size - 1))
+            label_smoothed.scatter_(1, target.data.unsqueeze(1), self.confidence)
+            label_smoothed[target == self.ignore_index, :] = 0
+            
+        return torch.sum(-label_smoothed * logit)
+
 def compute_cer(preds, labels):
     char2index, index2char = load_label('./label,csv/hangul.labels')
-    
+
+    count = 0    
     total_wer = 0
     total_cer = 0
 
@@ -47,17 +67,22 @@ def compute_cer(preds, labels):
             if b == 53: # eos
                 break
             units_pred.append(index2char[b])
-
+            
         label = moasseugi(units)
         pred = moasseugi(units_pred)
 
+        wer = eval_wer(pred, label)
         cer = eval_cer(pred, label)
+        
+        wer_len = len(label.split())
         cer_len = len(label.replace(" ", ""))
 
+        total_wer += wer
         total_cer += cer
+
+        total_wer_len += wer_len
         total_cer_len += cer_len
-
-
+        
     return total_wer, total_cer, total_wer_len, total_cer_len
 
 def load_label(label_path):
@@ -78,31 +103,26 @@ def load_label(label_path):
 
     return char2index, index2char
 
-def inference(model, las_model, val_loader, device, beam_search):
+def las_inference(model, val_loader, device):
     model.eval()
-    las_model.eval()
 
-    total_loss = 0
-   
+    eos_id = 53
+    total_num = 0
+
     total_cer = 0
-    total_wer = 0
-    
-    total_wer_len = 0
     total_cer_len = 0
 
-    with open("./rescoring_inference.txt", "w") as f:
+    with open("./las_inference.txt", "w") as f:
         f.write('\n')
         f.write("inference 시작")
         f.write('\n')
 
-    char2index, index2char = load_label('./label,csv/hangul.labels')
-
+    start_time = time.time()
+    total_batch_num = len(val_loader)
     with torch.no_grad():
         for i, data in enumerate(val_loader):
-            total_batch_num = len(val_loader)
-        
             inputs, targets, inputs_lengths, targets_lengths = data
-
+            total_num += sum(targets_lengths)
             inputs_lengths = torch.IntTensor(inputs_lengths)
             targets_lengths = torch.IntTensor(targets_lengths)
 
@@ -111,34 +131,16 @@ def inference(model, las_model, val_loader, device, beam_search):
             inputs_lengths = inputs_lengths.to(device)
             targets_lengths = targets_lengths.to(device)
 
-            transcripts = [targets.cpu().numpy()[i][:targets_lengths[i].item()]
-                       for i in range(targets.size(0))]
-            
-            begin_time = time.time()
-
-            beam_width = 5
-            
-            preds, best_total = model(inputs, inputs_lengths, W=beam_width) # torch.size([batch_size * W, max_len])
-            preds = preds.to(device)
-            best_total = best_total.to(device)
-
-            batch_size = inputs.size(0)
-        
-            logits, _, _ = las_model(inputs, None, best_total, 1, False)
-
+            logits, _, _ = model(inputs, inputs_lengths, targets, 0, False)
             logits = torch.stack(logits, dim=1).to(device)
+
             hypothesis = logits.max(-1)[1]
 
-            hypothesis = hypothesis.cpu().numpy()
-            
-            targets = targets.cpu().numpy()
-
-            best_total = best_total.cpu().numpy()
-            _, cer, _, cer_len = compute_cer(hypothesis, targets)
-
-            for a, b, c in zip(targets, best_total, hypothesis):
+            hypothesis = hypothesis.squeeze()
+            _, cer, _, cer_len = compute_cer(hypothesis.cpu().numpy(),targets.cpu().numpy())        
+            '''
+            for a, b in zip(targets,hypothesis):
                 chars = []
-                mid_chars = []
                 predic_chars = []
                 
                 for w in a:
@@ -146,32 +148,35 @@ def inference(model, las_model, val_loader, device, beam_search):
                         break
                     chars.append(index2char[w])
 
-                for q in b:
-                    if q == 53: # eos
-                        break
-                    mid_chars.append(index2char[q])
-
-                for y in c:
+                for y in b:
                     if y == 53: # eos
                         break
                     predic_chars.append(index2char[y])
                 
-                with open("./rescoring_inference.txt", "a") as f:
+                with open("./las_inference.txt", "a") as f:
                     f.write('\n')
                     f.write(moasseugi(chars))
                     f.write('\n')
-                    f.write(moasseugi(mid_chars))
-                    f.write('\n')
                     f.write(moasseugi(predic_chars))
                     f.write('\n')
-
-    final_cer = (cer / cer_len) * 100  
+            '''
+            total_cer += cer
+            total_cer_len += cer_len
+    
+    final_cer = (total_cer / total_cer_len) * 100
 
     return final_cer
 
 def main():
-    beam_mode = True
+    
     yaml_name = "/home/jhjeong/jiho_deep/two_pass/label,csv/Two_Pass.yaml"
+
+    with open("./las_only_train.txt", "w") as f:
+        f.write(yaml_name)
+        f.write('\n')
+        f.write('\n')
+        f.write("학습 시작")
+        f.write('\n')
 
     configfile = open(yaml_name)
     config = AttrDict(yaml.load(configfile, Loader=yaml.FullLoader))
@@ -191,14 +196,14 @@ def main():
                         window_size=WINDOW_SIZE,
                         window_stride=WINDOW_STRIDE,
                         window=WINDOW)
-    
+
     random.seed(config.data.seed)
     torch.manual_seed(config.data.seed)
     torch.cuda.manual_seed_all(config.data.seed)
 
     cuda = torch.cuda.is_available()
     device = torch.device('cuda' if cuda else 'cpu')
-    
+
     #-------------------------- Model Initialize --------------------------
     #Prediction Network
     enc = BaseEncoder(input_size=config.model.enc.input_size,
@@ -206,10 +211,8 @@ def main():
                       output_size=config.model.enc.output_size,
                       n_layers=config.model.enc.n_layers, 
                       dropout=config.model.dropout, 
-                      bidirectional=config.model.enc.bidirectional)
-    
-    enc.load_state_dict(torch.load("/home/jhjeong/jiho_deep/two_pass/model_save/first_train_enc_save_no_blank.pth"))
-    
+                      bidirectional=config.model.enc.bidirectional) 
+
     las_dec = Speller(vocab_size=config.model.vocab_size,
                       embedding_size=config.model.las_dec.embedding_size,
                       max_length=config.model.las_dec.max_length, 
@@ -223,39 +226,14 @@ def main():
                       dropout_p=config.model.dropout, 
                       device=device,
                       beam_mode=False)
-
-    las_dec.load_state_dict(torch.load("./model_save/second_last_las_dec_save_no_blank_end.pth"))
     
-    #Transcription Network
-    rnnt_dec = BaseDecoder(embedding_size=config.model.rnn_t_dec.embedding_size,
-                           hidden_size=config.model.rnn_t_dec.hidden_size, 
-                           vocab_size=config.model.vocab_size, 
-                           output_size=config.model.rnn_t_dec.output_size, 
-                           n_layers=config.model.rnn_t_dec.n_layers, 
-                           dropout=config.model.dropout)
-
-    #Joint Network
-    joint = JointNet(input_size=config.model.enc.output_size, 
-                     inner_dim=config.model.joint.inner_dim, 
-                     vocab_size=config.model.vocab_size)
-
-    #Transducer
-    rnnt_model = Transducer(encoder=enc, 
-                            decoder=rnnt_dec, 
-                            joint=joint,
-                            enc_hidden=config.model.enc.hidden_size,
-                            enc_projection=config.model.enc.output_size) 
-
-    rnnt_model.load_state_dict(torch.load("/home/jhjeong/jiho_deep/two_pass/model_save/first_train_model_save_no_blank.pth"))
-
-    rnnt_model = TopK_RNN_T_Decoder(rnnt_model, 5, device) # 5 = beam size
-    rnnt_model = rnnt_model.to(device)
-    
+    #top_dec = TopKDecoder(las_dec, 1)
     las_model = ListenAttendSpell(enc, las_dec, "false").to(device)
+    las_model.load_state_dict(torch.load("/home/jhjeong/jiho_deep/two_pass/model_save/las_model_save_end.pth"))
+    #las_model = nn.DataParallel(las_model).to(device)    
 
-
-    #rnnt_model = nn.DataParallel(rnnt_model).to(device)
-   
+    #-------------------------- Data load --------------------------   
+    #val dataset
     val_dataset = SpectrogramDataset(audio_conf, 
                                      config.data.val_path, 
                                      feature_type=config.audio_data.type,
@@ -263,22 +241,19 @@ def main():
                                      spec_augment=False)
 
     val_loader = AudioDataLoader(dataset=val_dataset,
-                                 shuffle=False,
+                                 shuffle=True,
                                  num_workers=config.data.num_workers,
                                  batch_size=2,
-                                 drop_last=False)
-    
-    print(" ")
-    print('{} test inference 시작'.format(datetime.datetime.now()))
-    print(" ")
-    
-    final_cer = inference(rnnt_model, las_model, val_loader, device, beam_mode)
+                                 drop_last=True)
 
-    print("final_cer -> ")
-    print(final_cer)
+    print(" ")
+    print("las_inference를 진행합니다.")
+    print(" ")
+
+    cer = las_inference(las_model, val_loader, device)
     
-    print('{} inference 끝'.format(datetime.datetime.now()))
-    
+    print("cer")
+    print(cer)
+
 if __name__ == '__main__':
     main()
-    
